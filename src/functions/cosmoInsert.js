@@ -7,39 +7,49 @@ app.http('cosmoInsert', {
   authLevel: 'anonymous',
   handler: async (request, context) => {
     let body;
+
+    // 1. Intentar parsear el cuerpo del request
     try {
       body = await request.json();
     } catch (err) {
-      context.log('Error al parsear JSON:', err);
+      context.log('❌ Error al parsear JSON:', err);
       return { status: 400, body: 'Formato JSON inválido' };
     }
 
-    const { nombre, correo } = body;
-    if (!nombre || !correo) {
-      return { status: 400, body: 'Faltan campos requeridos (nombre o correo)' };
-    }
+    // 2. Generar UUID único para la partición 'tickets'
+    const ticketId = crypto.randomUUID();
+
+    // 3. Combinar ticket UUID al documento recibido
+    const itemToInsert = {
+      ...body,
+      tickets: ticketId, // Usamos esta clave como partition key
+      timestamp: new Date().toISOString()
+    };
 
     try {
       const container = getContainer();
 
-      const uniqueTicketId = `ticket-${crypto.randomUUID()}`;
+      // 4. Insertar en Cosmos DB usando la clave de partición correcta
+      const { resource } = await container.items.create(
+        itemToInsert,
+        { partitionKey: ticketId } // 🔑 importante: este debe coincidir con `tickets`
+      );
 
-      const item = {
-        id: crypto.randomUUID(),
-        name: nombre,
-        email: correo,
-        tickets: uniqueTicketId, // clave de partición dinámica
-        timestamp: new Date().toISOString()
+      // 5. Respuesta de éxito
+      return {
+        status: 201,
+        body: {
+          message: 'Item insertado correctamente',
+          tickets: JSON.stringify(ticketId)
+        }
       };
 
-      const { resource } = await container.items.create(item, {
-        partitionKey: item.tickets
-      });
-
-      return { status: 201, body: `Item creado con ID: ${resource.id} y ticket: ${resource.tickets}` };
     } catch (error) {
-      context.log('Error al insertar item:', error);
-      return { status: 500, body: `Error del servidor: ${error.message}` };
+      context.log('❌ Error al insertar en Cosmos DB:', error);
+      return {
+        status: 500,
+        body: `Error al insertar en la base de datos: ${error.message}`
+      };
     }
   }
 });
