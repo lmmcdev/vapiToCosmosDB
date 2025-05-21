@@ -20,18 +20,23 @@ app.http('cosmoInsert', {
     }
 
     try {
-      const container = getContainer(); // Esto ya es el contenedor, no necesitas .database()
+      const container = getContainer();
+
+      const uniqueTicketId = `ticket-${crypto.randomUUID()}`;
 
       const item = {
         id: crypto.randomUUID(),
         name: nombre,
         email: correo,
-        category: "tickets",
+        tickets: uniqueTicketId, // clave de partición dinámica
         timestamp: new Date().toISOString()
       };
 
-      const { resource } = await container.items.create(item);
-      return { status: 201, body: `Item creado con ID: ${resource.id}` };
+      const { resource } = await container.items.create(item, {
+        partitionKey: item.tickets
+      });
+
+      return { status: 201, body: `Item creado con ID: ${resource.id} y ticket: ${resource.tickets}` };
     } catch (error) {
       context.log('Error al insertar item:', error);
       return { status: 500, body: `Error del servidor: ${error.message}` };
