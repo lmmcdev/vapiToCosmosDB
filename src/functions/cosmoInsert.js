@@ -18,11 +18,18 @@ app.http('cosmoInsert', {
 
     // 2. Generar UUID único para la partición 'tickets'
     const ticketId = crypto.randomUUID();
+    const status = "New";
+    const agent_asigned = "";
+    const tiket_source = "Phone";
 
     // 3. Combinar ticket UUID al documento recibido
     const itemToInsert = {
       ...body,
-      tickets: ticketId, // Usamos esta clave como partition key
+      tickets: ticketId,
+      status,
+      agent_asigned,
+      tiket_source,
+       // Usamos esta clave como partition key
       timestamp: new Date().toISOString()
     };
 
