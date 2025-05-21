@@ -1,5 +1,5 @@
 const { app } = require('@azure/functions');
-const { getContainer } = require('../../shared/cosmoClient');
+const { getContainer } = require('../shared/cosmoClient');
 
 app.http('updateTicket', {
   methods: ['PUT'],

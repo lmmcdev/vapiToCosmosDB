@@ -1,7 +1,7 @@
 const { app } = require('@azure/functions');
-const { getContainer } = require('../../shared/cosmoClient');
+const { getContainer } = require('../shared/cosmoClient');
 
-app.http('getTickets', {
+app.http('cosmoGet', {
   methods: ['GET'],
   authLevel: 'anonymous',
   handler: async (_req, context) => {

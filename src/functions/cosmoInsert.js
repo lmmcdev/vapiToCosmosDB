@@ -1,6 +1,6 @@
 const { app } = require('@azure/functions');
 const crypto = require('crypto');
-const { getContainer } = require('../../shared/cosmoClient');
+const { getContainer } = require('../shared/cosmoClient');
 
 app.http('vapiToCosmo', {
   methods: ['POST'],
