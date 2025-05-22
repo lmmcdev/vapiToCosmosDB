@@ -1,21 +1,28 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 
-app.http('cosmoUpdate', {
+app.http('cosmoUpdateNotes', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    const { tickets, updates, agent_email, event } = await req.json();
+    const { ticketId, notes, agent_email, event } = await req.json();
 
-    if (!tickets || !updates || !agent_email) {
+    if (!ticketId || !agent_email) {
       return {
         status: 400,
-        body: 'Faltan parámetros requeridos: tickets, updates o agent_email.'
+        body: 'Faltan parámetros requeridos: ticketId o agent_email.'
+      };
+    }
+
+    if (!Array.isArray(notes) && !event) {
+      return {
+        status: 400,
+        body: 'Se requiere al menos un array de notas o un evento para agregar.'
       };
     }
 
     const container = getContainer();
-    const item = container.item(tickets, tickets);
+    const item = container.item(ticketId, ticketId);
 
     try {
       const { resource: existing } = await item.read();
@@ -25,18 +32,6 @@ app.http('cosmoUpdate', {
       }
 
       const patchOps = [];
-      const allowedEditableFields = ['status', 'collaborators', 'agent_assigned', 'department'];
-
-      // Aplicar updates a campos simples
-      for (const key of allowedEditableFields) {
-        if (updates[key] !== undefined) {
-          patchOps.push({
-            op: 'replace',
-            path: `/${key}`,
-            value: updates[key]
-          });
-        }
-      }
 
       // Asegurar que notes exista
       if (!Array.isArray(existing.notes)) {
@@ -47,9 +42,9 @@ app.http('cosmoUpdate', {
         });
       }
 
-      // Agregar notas nuevas
-      if (Array.isArray(updates.notes)) {
-        for (const note of updates.notes) {
+      // Agregar notas nuevas si hay
+      if (Array.isArray(notes) && notes.length > 0) {
+        for (const note of notes) {
           patchOps.push({
             op: 'add',
             path: '/notes/-',
@@ -63,12 +58,12 @@ app.http('cosmoUpdate', {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
             agent_email,
-            event: `Se agregaron ${updates.notes.length} nota(s) al ticket.`
+            event: `Se agregaron ${notes.length} nota(s) al ticket.`
           }
         });
       }
 
-      // Agregar nota de evento del agente
+      // Agregar nota syslog de evento adicional si existe
       if (event) {
         patchOps.push({
           op: 'add',
@@ -83,7 +78,7 @@ app.http('cosmoUpdate', {
       }
 
       if (patchOps.length === 0) {
-        return { status: 400, body: 'No hay cambios para aplicar.' };
+        return { status: 400, body: 'No hay notas o eventos para agregar.' };
       }
 
       await item.patch(patchOps);
@@ -91,13 +86,13 @@ app.http('cosmoUpdate', {
       return {
         status: 200,
         body: {
-          message: 'Ticket actualizado correctamente.',
+          message: 'Notas actualizadas correctamente.',
           operaciones_aplicadas: patchOps.length
         }
       };
 
     } catch (err) {
-      context.log('❌ Error al actualizar ticket (patch):', err);
+      context.log('❌ Error al actualizar notas:', err);
       return {
         status: 500,
         body: 'Error en la actualización: ' + err.message
@@ -105,6 +100,7 @@ app.http('cosmoUpdate', {
     }
   }
 });
+
 
 /***ejemplo de json valido ****/
 /*

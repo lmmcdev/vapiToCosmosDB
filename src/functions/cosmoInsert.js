@@ -16,33 +16,49 @@ app.http('cosmoInsert', {
       return { status: 400, body: 'Formato JSON inválido' };
     }
 
-    // 2. Generar UUID único para la partición 'tickets'
+    // 2. Generar valores predeterminados
+    const date = new Date();
     const ticketId = crypto.randomUUID();
     const status = "New";
-    const agent_asigned = "";
+    const agent_assigned = "";
     const tiket_source = "Phone";
+    const collaborators = [];
+    const notes = [{
+      datetime: date.toISOString(),
+      event_type: "system_log",
+      event: "New ticket created"
+    }];
 
-    // 3. Combinar ticket UUID al documento recibido
+    // 3. Extraer department desde message.phoneNumber.name
+    let department = "Unknown";
+    try {
+      department = body.message.phoneNumber?.name || "Unknown";
+    } catch (e) {
+      context.log("⚠️ No se pudo extraer department desde messages.phoneNumber.name");
+    }
+
+    // 4. Combinar valores y construir el documento a insertar
     const itemToInsert = {
       ...body,
       tickets: ticketId,
+      id: ticketId,
       status,
-      agent_asigned,
+      agent_assigned,
       tiket_source,
-       // Usamos esta clave como partition key
+      collaborators,
+      notes,
+      department,
       timestamp: new Date().toISOString()
     };
 
     try {
       const container = getContainer();
 
-      // 4. Insertar en Cosmos DB usando la clave de partición correcta
       const { resource } = await container.items.create(
         itemToInsert,
-        { partitionKey: ticketId } // 🔑 importante: este debe coincidir con `tickets`
+        { partitionKey: ticketId }
       );
 
-      // 5. Respuesta de éxito
       return {
         status: 201,
         body: {
