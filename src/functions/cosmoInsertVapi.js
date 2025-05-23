@@ -13,13 +13,13 @@ app.http('cosmoInsertVapi', {
     try {
       body = await request.json();
     } catch (err) {
-      context.log('❌ Error al parsear JSON:', err);
-      return badRequest('Formato JSON inválido');
+      context.log('❌ Error parsing JSON:', err);
+      return badRequest('Invalid JSON');
     }
 
     // 2. Validar estructura mínima
     if (!body?.message?.analysis?.summary || !body?.message?.call.createdAt) {
-      return badRequest('Faltan campos obligatorios: summary o call_created_at');
+      return badRequest('Your request have missing parameters: summary o call_created_at');
     }
 
     const date = new Date();
@@ -72,11 +72,11 @@ app.http('cosmoInsertVapi', {
       const container = getContainer();
       await container.items.create(itemToInsert, { partitionKey: ticketId });
 
-      return success('Item insertado correctamente', { tickets: ticketId }, 201);
+      return success('Operation successfull', { tickets: ticketId }, 201);
 
     } catch (err) {
       context.log('❌ Error al insertar en Cosmos DB:', err);
-      return error('Error al insertar en la base de datos', 500, err.message);
+      return error('Error creating ticket', 500, err.message);
     }
   }
 });
