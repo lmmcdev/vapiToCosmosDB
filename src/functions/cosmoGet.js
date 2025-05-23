@@ -1,5 +1,6 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, error } = require('../shared/responseUtils');
 
 app.http('cosmoGet', {
   methods: ['GET'],
@@ -8,10 +9,8 @@ app.http('cosmoGet', {
     try {
       const container = getContainer();
 
-      // Obtener parámetro de la query string
       const agent_assigned = req.query.get('agent_assigned') || "";
 
-      // Construir query dinámicamente
       const querySpec = {
         query: `
           SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
@@ -29,22 +28,11 @@ app.http('cosmoGet', {
 
       const { resources: items } = await container.items.query(querySpec).fetchAll();
 
-      return {
-        status: 200,
-        body: JSON.stringify(items)
-      };
-    } catch (error) {
-      context.log('❌ Error al consultar tickets:', error);
-      return {
-        status: 500,
-        body: `Error: ${error.message}`
-      };
+      return success(items);
+      
+    } catch (err) {
+      context.log('❌ Error al consultar tickets:', err);
+      return error('Error al consultar tickets', err);
     }
   }
 });
-
-/*
-const agentEmail = "esteban@example.com";
-const response = await fetch(`https://<tu-funcion>.azurewebsites.net/api/cosmoGet?agent_assigned=${encodeURIComponent(agentEmail)}`);
-const data = await response.json();
-*/
