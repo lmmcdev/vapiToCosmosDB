@@ -11,11 +11,11 @@ app.http('cosmoUpdateStatus', {
     try {
       ({ ticketId, newStatus, agent_email } = await req.json());
     } catch (err) {
-      return badRequest('JSON inválido');
+      return badRequest('Invalid JSON');
     }
 
     if (!ticketId || !newStatus || !agent_email) {
-      return badRequest('Faltan parámetros requeridos: ticketId, newStatus o agent_email.');
+      return badRequest('Your request have missing parameters: ticketId, newStatus or agent_email.');
     }
 
     const container = getContainer();
@@ -29,7 +29,7 @@ app.http('cosmoUpdateStatus', {
       }
 
       if (existing.status === newStatus) {
-        return badRequest('El status es igual al actual, no hay cambios para aplicar.');
+        return badRequest('New and previous status are the same, no changes to apply.');
       }
 
       const patchOps = [];
@@ -50,19 +50,19 @@ app.http('cosmoUpdateStatus', {
           datetime: new Date().toISOString(),
           event_type: 'system_log',
           agent_email,
-          event: `Cambio de status: "${existing.status || 'In Progress'}" → "${newStatus}"`
+          event: `Status changed: "${existing.status || 'In Progress'}" → "${newStatus}"`
         }
       });
 
       await item.patch(patchOps);
 
-      return success('Status actualizado correctamente.', {
+      return success('Operation successfull.', {
         operaciones_aplicadas: patchOps.length
       });
 
     } catch (err) {
       context.log('❌ Error al actualizar status:', err);
-      return error('Error en la actualización del status.', 500, err.message);
+      return error('Error changing status.', 500, err.message);
     }
   }
 });

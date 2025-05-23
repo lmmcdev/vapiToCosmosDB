@@ -16,7 +16,7 @@ app.http('cosmoUpdatePatientName', {
     }
 
     if (!tickets || !agent_email || !nuevo_nombreapellido) {
-      return badRequest('Your request have missing parameters:: tickets, agent_email or nuevo_nombreapellido');
+      return badRequest('Your request have missing parameters: tickets, agent_email or nuevo_nombreapellido');
     }
 
     const container = getContainer();
