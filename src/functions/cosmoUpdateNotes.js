@@ -92,7 +92,7 @@ app.http('cosmoUpdateNotes', {
 
     } catch (err) {
       context.log('❌ Error al actualizar notas:', err);
-      return error('Error adding notes.', 500, err.message);
+      return error('Error.', 500, err.message);
     }
   }
 });
