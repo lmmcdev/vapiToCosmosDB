@@ -1,23 +1,26 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, badRequest, error } = require('../shared/responseUtils');
 
 app.http('cosmoUpdatePatientBOD', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    const { tickets, agent_email, nueva_fechanacimiento } = await req.json();
+    let tickets, agent_email, nueva_fechanacimiento;
 
-    if (!tickets || !agent_email || !nueva_fechanacimiento) {
-      return { status: 400, body: 'Faltan parámetros: tickets, agent_email o nueva_fechanacimiento.' };
+    try {
+      ({ tickets, agent_email, nueva_fechanacimiento } = await req.json());
+    } catch (err) {
+      return badRequest('JSON inválido');
     }
 
-    // Validar formato MM/DD/YYYY
+    if (!tickets || !agent_email || !nueva_fechanacimiento) {
+      return badRequest('Your request have missing parameters: tickets, agent_email or nueva_fechanacimiento.');
+    }
+
     const fechaRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/;
     if (!fechaRegex.test(nueva_fechanacimiento)) {
-      return {
-        status: 400,
-        body: 'Formato de fecha inválido. Usa MM/DD/YYYY (por ejemplo, 06/15/1985).'
-      };
+      return badRequest('Invalid date format, please set your date to MM/DD/YYYY (ex. 06/15/1985).');
     }
 
     const container = getContainer();
@@ -25,11 +28,10 @@ app.http('cosmoUpdatePatientBOD', {
     try {
       const item = container.item(tickets, tickets);
 
-      // Realizar PATCH parcial
       await item.patch([
         {
           op: 'replace',
-          path: '/message/analysis/structuredData/fechanacimiento_paciente',
+          path: '/patient_dob',
           value: nueva_fechanacimiento
         },
         {
@@ -39,19 +41,16 @@ app.http('cosmoUpdatePatientBOD', {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
             agent_email,
-            event: `Cambio de fecha de nacimiento del paciente a "${nueva_fechanacimiento}"`
+            event: `Patient DOB changed to "${nueva_fechanacimiento}"`
           }
         }
       ]);
 
-      return {
-        status: 200,
-        body: { message: 'Fecha de nacimiento actualizada correctamente.' }
-      };
+      return success('Operation successfull.');
 
     } catch (err) {
       context.log('❌ Error en PATCH parcial:', err);
-      return { status: 500, body: 'Error en la actualización parcial: ' + err.message };
+      return error('Error updating patient dob.', 500, err.message);
     }
   }
 });

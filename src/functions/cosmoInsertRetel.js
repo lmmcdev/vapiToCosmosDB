@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const crypto = require('crypto');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, badRequest, error } = require('../shared/responseUtils');
 
 app.http('cosmoInsertRetel', {
   methods: ['POST'],
@@ -8,16 +9,22 @@ app.http('cosmoInsertRetel', {
   handler: async (request, context) => {
     let body;
 
-    // 1. Intentar parsear el cuerpo del request
+    // 1. Intentar parsear el JSON
     try {
       body = await request.json();
     } catch (err) {
-      context.log('❌ Error al parsear JSON:', err);
-      return { status: 400, body: 'Formato JSON inválido' };
+      context.log('❌ Error parsing JSON:', err);
+      return badRequest('Invalid JSON');
     }
 
-    // 2. Captura de campos para compatibilizar los tickets entre vapi y retel
-    //Campos agregados
+    // 2. Validar y extraer campos
+    let data;
+    try {
+      data = body.call.call_analysis.custom_analysis_data;
+    } catch (err) {
+      return badRequest('Can not found node custom_analysis_data, error');
+    }
+
     const date = new Date();
     const ticketId = crypto.randomUUID();
     const status = "New";
@@ -30,22 +37,31 @@ app.http('cosmoInsertRetel', {
       event: "New ticket created"
     }];
 
-    //campos standares de los tickets (ponerlos en el nivel raiz del json)
-    let summary = body.call.call_analysis.custom_analysis_data.summary;
-    let call_reason = body.call.call_analysis.custom_analysis_data.call_reason;
-    let start_time = body.call.start_timestamp;
-    let patient_name = body.call.call_analysis.custom_analysis_data.patient_name;
-    let patient_dob = body.call.call_analysis.custom_analysis_data.dob;
-    let caller_name = body.call.call_analysis.custom_analysis_data.caller_name;
-    let callback_number = body.call.call_analysis.custom_analysis_data.alternate_contact_number;
-    let phone = body.call.call_analysis.custom_analysis_data.from_number;
-    let url_audio = body.call.call_analysis.custom_analysis_data.recording_url;
-    let caller_id = body.call.call_analysis.custom_analysis_data.agent_name;
-    let call_cost = body.call.call_cost.combined_cost; //aclarar con Erika como lo dan aqui el costo de la llamada
-    let assigned_department = body.call.call_analysis.custom_analysis_data.assigned_department;
-    let assigned_role = body.call.call_analysis.custom_analysis_data.assigned_role;
-    let caller_type = body.call.call_analysis.custom_analysis_data.caller_type;
-    let call_duration = body.call.call_cost.total_duration_seconds;
+    const {
+      summary,
+      call_reason,
+      patient_name,
+      dob: patient_dob,
+      caller_name,
+      alternate_contact_number: callback_number,
+      from_number: phone,
+      recording_url: url_audio,
+      agent_name: caller_id,
+      assigned_department,
+      assigned_role,
+      caller_type
+    } = data;
+
+    const start_time = body.call?.start_timestamp;
+    const call_cost_cent = body.call?.call_cost?.combined_cost;
+    const call_duration = body.call?.call_cost?.total_duration_seconds;
+
+    const call_cost = parseFloat((call_cost_cent/100).toFixed(4));
+    //const call_cost = formatter.format(call_cost_centv);
+
+    if (!summary || !call_reason || !start_time || !patient_name) {
+      return badRequest('Your request have missing parameters');
+    }
 
     const creation_date = new Date(start_time).toLocaleString('en-US', {
       year: 'numeric',
@@ -55,15 +71,16 @@ app.http('cosmoInsertRetel', {
       minute: '2-digit',
       hour12: false
     });
-    // 3. Combinar ticket UUID al documento recibido
+
+    // 3. Armar item a insertar
     const itemToInsert = {
       ...body,
       tickets: ticketId,
       id: ticketId,
       summary, call_reason, creation_date, patient_name,
-      patient_dob,caller_name,callback_number,phone,
-      url_audio,caller_id,call_cost,assigned_department,
-      assigned_role,caller_type,call_duration,
+      patient_dob, caller_name, callback_number, phone,
+      url_audio, caller_id, call_cost, assigned_department,
+      assigned_role, caller_type, call_duration,
       status,
       agent_assigned,
       tiket_source,
@@ -74,28 +91,13 @@ app.http('cosmoInsertRetel', {
 
     try {
       const container = getContainer();
+      await container.items.create(itemToInsert, { partitionKey: ticketId });
 
-      // 4. Insertar en Cosmos DB usando la clave de partición correcta
-      const { resource } = await container.items.create(
-        itemToInsert,
-        { partitionKey: ticketId } // 🔑 importante: este debe coincidir con `tickets`
-      );
+      return success('Operation successfull', { tickets: ticketId }, 201);
 
-      // 5. Respuesta de éxito
-      return {
-        status: 201,
-        body: {
-          message: 'Item insertado correctamente',
-          tickets: JSON.stringify(ticketId)
-        }
-      };
-
-    } catch (error) {
-      context.log('❌ Error al insertar en Cosmos DB:', error);
-      return {
-        status: 500,
-        body: `Error al insertar en la base de datos: ${error.message}`
-      };
+    } catch (err) {
+      context.log('❌ Error al insertar en Cosmos DB:', err);
+      return error('Error, ticket not created', 500, err.message);
     }
   }
 });

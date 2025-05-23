@@ -36,14 +36,25 @@ app.http('cosmoInsertForm', {
     const tiket_source = "Form";
     const collaborators = [];
 
+    const fechaRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/;
+    if (!fechaRegex.test(form.patient_dob)) {
+        return {
+        status: 400,
+        body: `Invalid date format, please set your date to MM/DD/YYYY (ex. 06/15/1985)`
+      };
+      //return badRequest('Invalid date format, please set your date to MM/DD/YYYY (ex. 06/15/1985).');
+    }
+
+
     const summary = form.summary;
-    const status = form.status?.trim() || "new"; // Si no hay status, se pone "new"
+    const status = form.status?.trim() || "New"; // Si no hay status, se pone "new"
     const patient_name = form.patient_name;
     const patient_dob = form.patient_dob;
     const phone = form.from_number;
     const caller_id = form.caller_id;
     const call_reason = form.call_reason;
     const agent_note = form.agent_note;
+    const assigned_department = form.assigned_department;
 
     // 4. Generar notas
     const notes = [
@@ -78,6 +89,7 @@ app.http('cosmoInsertForm', {
         phone,
         caller_id,
         call_reason,
+        assigned_department
     };
 
     try {

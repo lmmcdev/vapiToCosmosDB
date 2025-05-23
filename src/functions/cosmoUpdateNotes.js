@@ -1,24 +1,25 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 
 app.http('cosmoUpdateNotes', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    const { ticketId, notes, agent_email, event } = await req.json();
+    let ticketId, notes, agent_email, event;
+
+    try {
+      ({ ticketId, notes, agent_email, event } = await req.json());
+    } catch (err) {
+      return badRequest('Invalid JSON');
+    }
 
     if (!ticketId || !agent_email) {
-      return {
-        status: 400,
-        body: 'Faltan parámetros requeridos: ticketId o agent_email.'
-      };
+      return badRequest('Your request have missing parameters: ticketId or agent_email.');
     }
 
     if (!Array.isArray(notes) && !event) {
-      return {
-        status: 400,
-        body: 'Se requiere al menos un array de notas o un evento para agregar.'
-      };
+      return badRequest('Missing notes or array malformed.');
     }
 
     const container = getContainer();
@@ -28,7 +29,7 @@ app.http('cosmoUpdateNotes', {
       const { resource: existing } = await item.read();
 
       if (!existing) {
-        return { status: 404, body: 'Ticket no encontrado.' };
+        return notFound('Ticket no encontrado.');
       }
 
       const patchOps = [];
@@ -42,7 +43,7 @@ app.http('cosmoUpdateNotes', {
         });
       }
 
-      // Agregar notas nuevas si hay
+      // Agregar notas nuevas
       if (Array.isArray(notes) && notes.length > 0) {
         for (const note of notes) {
           patchOps.push({
@@ -51,6 +52,8 @@ app.http('cosmoUpdateNotes', {
             value: note
           });
         }
+
+        // Log de agregado de notas
         patchOps.push({
           op: 'add',
           path: '/notes/-',
@@ -63,7 +66,7 @@ app.http('cosmoUpdateNotes', {
         });
       }
 
-      // Agregar nota syslog de evento adicional si existe
+      // Agregar log por evento personalizado
       if (event) {
         patchOps.push({
           op: 'add',
@@ -78,46 +81,18 @@ app.http('cosmoUpdateNotes', {
       }
 
       if (patchOps.length === 0) {
-        return { status: 400, body: 'No hay notas o eventos para agregar.' };
+        return badRequest('No hay notas o eventos para agregar.');
       }
 
       await item.patch(patchOps);
 
-      return {
-        status: 200,
-        body: {
-          message: 'Notas actualizadas correctamente.',
-          operaciones_aplicadas: patchOps.length
-        }
-      };
+      return success('Notas actualizadas correctamente.', {
+        operaciones_aplicadas: patchOps.length
+      });
 
     } catch (err) {
       context.log('❌ Error al actualizar notas:', err);
-      return {
-        status: 500,
-        body: 'Error en la actualización: ' + err.message
-      };
+      return error('Error en la actualización de notas.', 500, err.message);
     }
   }
 });
-
-
-/***ejemplo de json valido ****/
-/*
-{
-  "tickets": "7bc5d900-723f-4ada-9155-cda7ecf572be",
-  "updates": {
-    "status": "In Progress",
-    "notes": [
-      {
-        "datetime": "2025-05-22T14:00:00Z",
-        "event_type": "agent_note",
-        "agent_email": "agente1@empresa.com",
-        "event": "Llamé al paciente para coordinar la consulta, queda pendiente confirmar horario."
-      }
-    ]
-  },
-  "event": "El agente comenzó a trabajar el caso",
-  "agent_email": "agente1@empresa.com"
-}
-*/

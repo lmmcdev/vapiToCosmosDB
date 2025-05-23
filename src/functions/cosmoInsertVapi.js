@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const crypto = require('crypto');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, badRequest, error } = require('../shared/responseUtils');
 
 app.http('cosmoInsertVapi', {
   methods: ['POST'],
@@ -8,16 +9,19 @@ app.http('cosmoInsertVapi', {
   handler: async (request, context) => {
     let body;
 
-    // 1. Intentar parsear el cuerpo del request
+    // 1. Intentar parsear el cuerpo
     try {
       body = await request.json();
     } catch (err) {
       context.log('❌ Error al parsear JSON:', err);
-      return { status: 400, body: 'Formato JSON inválido' };
+      return badRequest('Formato JSON inválido');
     }
 
-    // 2. Captura de campos para compatibilizar los tickets entre vapi y retel
-    //Campos agregados
+    // 2. Validar estructura mínima
+    if (!body?.message?.analysis?.summary || !body?.message?.call.createdAt) {
+      return badRequest('Faltan campos obligatorios: summary o call_created_at');
+    }
+
     const date = new Date();
     const ticketId = crypto.randomUUID();
     const status = "New";
@@ -30,33 +34,32 @@ app.http('cosmoInsertVapi', {
       event: "New ticket created"
     }];
 
-    //campos standares de los tickets (ponerlos en el nivel raiz del json)
-    let summary = body.message.summary;
-    let call_reason = body.message.analysis.structuredData.razon_llamada;
-    let creation_date = body.message.call_created_at;
-    let patient_name = body.message.analysis.structuredData.nombreapellidos_paciente;
-    let patient_dob = body.message.analysis.structuredData.fechanacimiento_paciente;
-    let caller_name = body.message.analysis.structuredData.nombreapellidos_familiar;
-    let callback_number = body.message.analysis.structuredData.numero_alternativo;
-    let phone = body.message.call.customer.number;
-    let url_audio = body.message.stereoRecordingUrl;
-    let caller_id = body.message.phoneNumber.name;
-    let call_cost = body.message.cost;
-    let assigned_department = body.message.analysis.structuredData.vapi_assignment;
-    let assigned_role = body.message.analysis.structuredData.assigned_role;
-    let caller_type = body.message.analysis.structuredData.llamada;
-    let call_duration = body.message.duration_minutes;
+    // 3. Campos estándar para el ticket
+    const summary = body.message.analysis?.summary;
+    const call_reason = body.message.analysis?.structuredData?.razon_llamada;
+    const creation_date = body.message.call.createdAt;
+    const patient_name = body.message.analysis?.structuredData?.nombreapellidos_paciente;
+    const patient_dob = body.message.analysis?.structuredData?.fechanacimiento_paciente;
+    const caller_name = body.message.analysis?.structuredData?.nombreapellidos_familiar;
+    const callback_number = body.message.analysis?.structuredData?.numero_alternativo;
+    const phone = body.message.call?.customer?.number;
+    const url_audio = body.message.stereoRecordingUrl;
+    const caller_id = body.message.phoneNumber?.name;
+    const call_cost = body.message.cost;
+    const assigned_department = body.message.analysis?.structuredData?.vapi_assignment;
+    const assigned_role = body.message.analysis?.structuredData?.assigned_role;
+    const caller_type = body.message.analysis?.structuredData?.llamada;
+    const call_duration = body.message.durationSeconds;
 
-
-    // 4. Combinar valores y construir el documento a insertar
+    // 4. Construcción del item para Cosmos DB
     const itemToInsert = {
       ...body,
       tickets: ticketId,
       id: ticketId,
       summary, call_reason, creation_date, patient_name,
-      patient_dob,caller_name,callback_number,phone,
-      url_audio,caller_id,call_cost,assigned_department,
-      assigned_role,caller_type,call_duration,
+      patient_dob, caller_name, callback_number, phone,
+      url_audio, caller_id, call_cost, assigned_department,
+      assigned_role, caller_type, call_duration,
       status,
       agent_assigned,
       tiket_source,
@@ -67,26 +70,13 @@ app.http('cosmoInsertVapi', {
 
     try {
       const container = getContainer();
+      await container.items.create(itemToInsert, { partitionKey: ticketId });
 
-      const { resource } = await container.items.create(
-        itemToInsert,
-        { partitionKey: ticketId }
-      );
+      return success('Item insertado correctamente', { tickets: ticketId }, 201);
 
-      return {
-        status: 201,
-        body: {
-          message: 'Item insertado correctamente',
-          tickets: JSON.stringify(ticketId)
-        }
-      };
-
-    } catch (error) {
-      context.log('❌ Error al insertar en Cosmos DB:', error);
-      return {
-        status: 500,
-        body: `Error al insertar en la base de datos: ${error.message}`
-      };
+    } catch (err) {
+      context.log('❌ Error al insertar en Cosmos DB:', err);
+      return error('Error al insertar en la base de datos', 500, err.message);
     }
   }
 });

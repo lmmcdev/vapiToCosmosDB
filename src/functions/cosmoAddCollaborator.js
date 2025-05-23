@@ -1,36 +1,43 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, error, badRequest, notFound } = require('../shared/responseUtils');
 
 app.http('addCollaborator', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    const { tickets, agent_email, new_collaborators } = await req.json();
+    let tickets, agent_email, new_collaborators;
+
+    try {
+      ({ tickets, agent_email, new_collaborators } = await req.json());
+    } catch {
+      return badRequest('Invalid JSON.');
+    }
 
     if (!tickets || !agent_email || !Array.isArray(new_collaborators)) {
-      return { status: 400, body: 'Faltan parámetros requeridos o formato inválido.' };
+      return badRequest('Your request have missing parameters or new_collaborators is not an array.');
     }
 
     const container = getContainer();
     const item = container.item(tickets, tickets);
 
     try {
-      // Leer colaboradores actuales
       const { resource: existing } = await item.read();
+
       if (!existing) {
-        return { status: 404, body: 'Ticket no encontrado.' };
+        return notFound('Ticket not found.');
       }
 
       const existingCollaborators = Array.isArray(existing.collaborators) ? existing.collaborators : [];
       const collaboratorsToAdd = new_collaborators.filter(c => !existingCollaborators.includes(c));
 
       if (collaboratorsToAdd.length === 0) {
-        return { status: 200, body: { message: 'No se agregaron colaboradores nuevos (ya existen).' } };
+        return success('Some collaborator are already working in this ticket.');
       }
 
       const patchOperations = [];
 
-      // Agregar cada colaborador con operación add
+      // Agregar colaboradores
       for (const collaborator of collaboratorsToAdd) {
         patchOperations.push({
           op: 'add',
@@ -39,7 +46,7 @@ app.http('addCollaborator', {
         });
       }
 
-      // Asegurarse que 'notes' exista (si no existe, se puede agregar primero)
+      // Asegurar existencia de notes
       if (!Array.isArray(existing.notes)) {
         patchOperations.push({
           op: 'add',
@@ -48,7 +55,7 @@ app.http('addCollaborator', {
         });
       }
 
-      // Agregar log en notes
+      // Log en notes
       patchOperations.push({
         op: 'add',
         path: '/notes/-',
@@ -56,24 +63,19 @@ app.http('addCollaborator', {
           datetime: new Date().toISOString(),
           event_type: 'system_log',
           agent_email,
-          event: `Colaboradores agregados: ${collaboratorsToAdd.join(', ')}`
+          event: `New collaborators added: ${collaboratorsToAdd.join(', ')}`
         }
       });
 
-      // Ejecutar el patch parcial
       await item.patch(patchOperations);
 
-      return {
-        status: 200,
-        body: {
-          message: 'Colaboradores agregados correctamente.',
-          colaboradores_agregados: collaboratorsToAdd
-        }
-      };
+      return success('Operation successfull.', {
+        colaboradores_agregados: collaboratorsToAdd
+      });
 
     } catch (err) {
       context.log('❌ Error en PATCH parcial (addCollaborator):', err);
-      return { status: 500, body: 'Error al actualizar: ' + err.message };
+      return error('Errors adding collaborators.', 500, err.message);
     }
   }
 });
