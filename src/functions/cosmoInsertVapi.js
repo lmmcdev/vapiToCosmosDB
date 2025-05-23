@@ -38,7 +38,7 @@ app.http('cosmoInsertVapi', {
     const summary = body.message.analysis?.summary;
     const call_reason = body.message.analysis?.structuredData?.razon_llamada;
     const creation_date = body.message.call.createdAt;
-    const patient_name = body.message.analysis?.structuredData?.nombreapellidos_paciente;
+    const patient_name = body.message.analysis?.structuredData?.nombreapellido_paciente;
     const patient_dob = body.message.analysis?.structuredData?.fechanacimiento_paciente;
     const caller_name = body.message.analysis?.structuredData?.nombreapellidos_familiar;
     const callback_number = body.message.analysis?.structuredData?.numero_alternativo;
