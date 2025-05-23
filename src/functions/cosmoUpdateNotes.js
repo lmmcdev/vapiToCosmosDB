@@ -29,7 +29,7 @@ app.http('cosmoUpdateNotes', {
       const { resource: existing } = await item.read();
 
       if (!existing) {
-        return notFound('Ticket no encontrado.');
+        return notFound('Ticket not found.');
       }
 
       const patchOps = [];
@@ -61,7 +61,7 @@ app.http('cosmoUpdateNotes', {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
             agent_email,
-            event: `Se agregaron ${notes.length} nota(s) al ticket.`
+            event: `Added ${notes.length} note(s) to the ticket.`
           }
         });
       }
@@ -81,18 +81,18 @@ app.http('cosmoUpdateNotes', {
       }
 
       if (patchOps.length === 0) {
-        return badRequest('No hay notas o eventos para agregar.');
+        return badRequest('No notes or event to add.');
       }
 
       await item.patch(patchOps);
 
-      return success('Notas actualizadas correctamente.', {
+      return success('Operation successfull.', {
         operaciones_aplicadas: patchOps.length
       });
 
     } catch (err) {
       context.log('❌ Error al actualizar notas:', err);
-      return error('Error en la actualización de notas.', 500, err.message);
+      return error('Error adding notes.', 500, err.message);
     }
   }
 });
