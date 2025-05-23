@@ -50,7 +50,7 @@ app.http('cosmoUpdatePatientBOD', {
 
     } catch (err) {
       context.log('❌ Error en PATCH parcial:', err);
-      return error('Error updating patient.', 500, err.message);
+      return error('Error updating patient bod.', 500, err.message);
     }
   }
 });
