@@ -17,7 +17,7 @@ app.http('cosmoGet', {
                  c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
                  c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
                  c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
-                 c.tiket_source
+                 c.tiket_source, c.phone
           FROM c
           WHERE c.agent_assigned = @agent OR c.agent_assigned = ""
         `,
