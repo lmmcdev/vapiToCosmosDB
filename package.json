@@ -9,8 +9,9 @@
   },
   "dependencies": {
     "@azure/cosmos": "^4.4.1",
-    "@azure/functions": "^4.7.0",
-    "@azure/identity": "^4.10.0"
+    "@azure/functions": "^4.7.2",
+    "@azure/identity": "^4.10.0",
+    "@microsoft/signalr": "^8.0.7"
   },
   "devDependencies": {
     "azure-functions-core-tools": "^4.x"
