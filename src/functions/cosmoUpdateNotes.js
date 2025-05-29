@@ -15,11 +15,24 @@ app.http('cosmoUpdateNotes', {
     }
 
     if (!ticketId || !agent_email) {
-      return badRequest('Your request have missing parameters: ticketId or agent_email.');
+      return badRequest('Your request has missing parameters: ticketId or agent_email.');
     }
 
     if (!Array.isArray(notes) && !event) {
-      return badRequest('Missing notes or array malformed.');
+      return badRequest('Missing notes or malformed array.');
+    }
+
+    // Validar que todas las notas tengan agent_email
+    if (Array.isArray(notes)) {
+      for (const [i, note] of notes.entries()) {
+        if (
+          typeof note !== 'object' ||
+          !note.agent_email ||
+          typeof note.agent_email !== 'string'
+        ) {
+          return badRequest(`Note at index ${i} is missing a valid 'agent_email'.`);
+        }
+      }
     }
 
     const container = getContainer();
@@ -34,7 +47,6 @@ app.http('cosmoUpdateNotes', {
 
       const patchOps = [];
 
-      // Asegurar que notes exista
       if (!Array.isArray(existing.notes)) {
         patchOps.push({
           op: 'add',
@@ -43,17 +55,20 @@ app.http('cosmoUpdateNotes', {
         });
       }
 
-      // Agregar notas nuevas
+      // Agregar notas válidas
       if (Array.isArray(notes) && notes.length > 0) {
         for (const note of notes) {
           patchOps.push({
             op: 'add',
             path: '/notes/-',
-            value: note
+            value: {
+              ...note,
+              datetime: note.datetime || new Date().toISOString(),
+              event_type: note.event_type || 'user_log'
+            }
           });
         }
 
-        // Log de agregado de notas
         patchOps.push({
           op: 'add',
           path: '/notes/-',
@@ -66,7 +81,6 @@ app.http('cosmoUpdateNotes', {
         });
       }
 
-      // Agregar log por evento personalizado
       if (event) {
         patchOps.push({
           op: 'add',
@@ -86,13 +100,13 @@ app.http('cosmoUpdateNotes', {
 
       await item.patch(patchOps);
 
-      return success('Operation successfull.', {
-        operaciones_aplicadas: patchOps.length
+      return success('Operation successful.', {
+        applied_operations: patchOps.length
       });
 
     } catch (err) {
-      context.log('❌ Error al actualizar notas:', err);
-      return error('Error.', 500, err.message);
+      context.log('❌ Error updating notes:', err);
+      return error('Internal Server Error', 500, err.message);
     }
   }
 });
