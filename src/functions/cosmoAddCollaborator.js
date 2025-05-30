@@ -2,15 +2,26 @@ const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { success, error, badRequest, notFound } = require('../shared/responseUtils');
 
-//update whole array
+const isValidEmail = (email) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
 app.http('cosmoUpdateCollaborators', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    const { ticketId, collaborators } = await req.json();
+    const { ticketId, collaborators = [], agent_email } = await req.json();
 
     if (!ticketId || !Array.isArray(collaborators)) {
       return badRequest('Missing ticketId or collaborators array.');
+    }
+
+    const incomingClean = [...new Set(
+      collaborators.map(e => e.trim().toLowerCase())
+    )];
+
+    const invalid = incomingClean.filter(email => !isValidEmail(email));
+    if (invalid.length > 0) {
+      return badRequest(`Invalid email(s): ${invalid.join(', ')}`);
     }
 
     const container = getContainer();
@@ -18,14 +29,26 @@ app.http('cosmoUpdateCollaborators', {
 
     try {
       const { resource } = await item.read();
-
       if (!resource) return notFound('Ticket not found.');
+
+      const current = Array.isArray(resource.collaborators)
+        ? resource.collaborators.map(e => e.trim().toLowerCase())
+        : [];
+
+      // Filtrar los que ya existen
+      const newCollaborators = incomingClean.filter(email => !current.includes(email));
+
+      if (newCollaborators.length === 0) {
+        return success('No new collaborators to add.');
+      }
+
+      const updated = [...current, ...newCollaborators];
 
       await item.patch([
         {
           op: 'replace',
           path: '/collaborators',
-          value: collaborators
+          value: updated
         },
         {
           op: 'add',
@@ -33,15 +56,16 @@ app.http('cosmoUpdateCollaborators', {
           value: {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
-            agent_email: 'SYSTEM',
-            event: `Collaborators updated to: ${collaborators.join(', ')}`
+            agent_email: agent_email || 'SYSTEM',
+            event: `Added new collaborators: ${newCollaborators.join(', ')}`
           }
         }
       ]);
 
-      return success('Collaborators updated.');
+      return success('Collaborators updated.', { newCollaborators });
     } catch (err) {
       return error('Failed to update collaborators', 500, err.message);
     }
   }
 });
+
