@@ -7,10 +7,26 @@ const containerId = process.env.COSMOS_AGENT_CONTAINER_ID;
 
 const client = new CosmosClient({ endpoint, key });
 
-const getContainer = () => {
+const getAgentContainer = () => {
   const database = client.database(databaseId);
   return database.container(containerId);
 };
 
-module.exports = { getContainer };
+module.exports = { getAgentContainer };
 
+//LOCALHOST
+/*const { CosmosClient } = require("@azure/cosmos");
+
+const endpoint = "https://lmmccosmos02.documents.azure.com:443/";
+const key = ""; // la clave primaria
+
+const client = new CosmosClient({
+  endpoint,
+  key
+});
+
+const getAgentContainer = () => {
+  const db = client.database("IAData");
+  return db.container("agents_id");
+};
+module.exports = { getAgentContainer };*/
