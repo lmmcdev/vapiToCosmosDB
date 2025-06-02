@@ -1,6 +1,6 @@
 // src/functions/cosmoGet.js
 const { app } = require('@azure/functions');
-const { getContainer } = require('../shared/cosmoAgentClient');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, error } = require('../shared/responseUtils');
 
 app.http('cosmoGetAgents', {
@@ -8,7 +8,7 @@ app.http('cosmoGetAgents', {
   authLevel: 'anonymous',
   handler: async (req, context) => {
     try {
-      const container = getContainer();
+      const container = getAgentContainer();
 
       const querySpec = {
         query: `
