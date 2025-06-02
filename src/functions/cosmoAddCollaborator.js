@@ -35,8 +35,12 @@ app.http('cosmoUpdateCollaborators', {
         ? resource.collaborators.map(e => e.trim().toLowerCase())
         : [];
 
-      // Filtrar los que ya existen
-      const newCollaborators = incomingClean.filter(email => !current.includes(email));
+      const assignedAgent = resource.assigned_agent?.trim().toLowerCase();
+
+      // Filtrar los que ya existen y excluir al agente asignado
+      const newCollaborators = incomingClean.filter(email =>
+        !current.includes(email) && email !== assignedAgent
+      );
 
       if (newCollaborators.length === 0) {
         return success('No new collaborators to add.');
@@ -68,4 +72,3 @@ app.http('cosmoUpdateCollaborators', {
     }
   }
 });
-
