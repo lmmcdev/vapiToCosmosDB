@@ -37,22 +37,24 @@ app.http('cosmoUpdateCollaborators', {
 
       const assignedAgent = resource.assigned_agent?.trim().toLowerCase();
 
-      // Filtrar los que ya existen y excluir al agente asignado
-      const newCollaborators = incomingClean.filter(email =>
-        !current.includes(email) && email !== assignedAgent
-      );
+      // Excluir al assigned agent del array final
+      const finalCollaborators = incomingClean.filter(e => e !== assignedAgent);
 
-      if (newCollaborators.length === 0) {
-        return success('No new collaborators to add.');
+      // Determinar cambios
+      const removed = current.filter(e => !finalCollaborators.includes(e));
+      const added = finalCollaborators.filter(e => !current.includes(e));
+
+      // Si no hay cambios reales
+      if (removed.length === 0 && added.length === 0) {
+        return success('No changes to collaborators.');
       }
 
-      const updated = [...current, ...newCollaborators];
-
+      // Patch con nueva lista y nota
       await item.patch([
         {
           op: 'replace',
           path: '/collaborators',
-          value: updated
+          value: finalCollaborators
         },
         {
           op: 'add',
@@ -61,12 +63,12 @@ app.http('cosmoUpdateCollaborators', {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
             agent_email: agent_email || 'SYSTEM',
-            event: `Added new collaborators: ${newCollaborators.join(', ')}`
+            event: `Updated collaborators. Added: ${added.join(', ') || 'None'}, Removed: ${removed.join(', ') || 'None'}`
           }
         }
       ]);
 
-      return success('Collaborators updated.', { newCollaborators });
+      return success('Collaborators updated.', { added, removed });
     } catch (err) {
       return error('Failed to update collaborators', 500, err.message);
     }
