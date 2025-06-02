@@ -1,6 +1,6 @@
 const { app } = require('@azure/functions');
 const crypto = require('crypto');
-const { getContainer } = require('../shared/cosmoAgentClient');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, error, badRequest } = require('../shared/responseUtils');
 
 app.http('cosmoInsertAgent', {
@@ -30,7 +30,7 @@ app.http('cosmoInsertAgent', {
     const agent_email = form.agent_email.toLowerCase();
 
     try {
-      const container = getContainer();
+      const container = getAgentContainer();
 
       // 3. Verificar si ya existe el agente por email
       const querySpec = {
