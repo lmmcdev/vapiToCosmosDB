@@ -23,6 +23,7 @@ app.http('cosmoUpdateTicketDepartment', {
 
       await item.patch([
         { op: 'replace', path: '/assigned_department', value: new_department },
+        { op: 'replace', path: '/agent_assigned', value: '' }, // 🔁 Limpia el campo
         {
           op: 'add',
           path: '/notes/-',
@@ -34,7 +35,7 @@ app.http('cosmoUpdateTicketDepartment', {
         }
       ]);
 
-      return success('Ticket department updated successfully.');
+      return success('Ticket department and assigned agent cleared successfully.');
     } catch (err) {
       context.log('❌ Error updating ticket:', err);
       return error('Error updating ticket department.', 500, err.message);
