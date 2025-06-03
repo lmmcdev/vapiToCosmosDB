@@ -42,6 +42,7 @@ app.http('cosmoInsertForm', {
     const caller_id = form.caller_id;
     const call_reason = form.call_reason;
     const agent_note = form.agent_note;
+    const assigned_department = form.assigned_department;
 
     // 4. Generar notas
     const notes = [
