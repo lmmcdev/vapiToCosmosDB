@@ -2,6 +2,7 @@ const { app } = require('@azure/functions');
 const crypto = require('crypto');
 const { getContainer } = require('../shared/cosmoClient');
 const { success, error, badRequest } = require('../shared/responseUtils');
+const dayjs = require('dayjs')
 
 app.http('cosmoInsertForm', {
   methods: ['POST'],
@@ -29,6 +30,10 @@ app.http('cosmoInsertForm', {
 
     // 3. Preparar campos
     const date = new Date();
+    const iso = date.toISOString();
+    const creation_date = dayjs(iso).format('MM/DD/YYYY, HH:mm');
+
+    
     const ticketId = crypto.randomUUID();
     const agent_assigned = "";
     const tiket_source = "Form";
@@ -43,7 +48,6 @@ app.http('cosmoInsertForm', {
     const call_reason = form.call_reason;
     const agent_note = form.agent_note;
     const assigned_department = form.assigned_department;
-
     // 4. Generar notas
     const notes = [
       {
@@ -77,7 +81,8 @@ app.http('cosmoInsertForm', {
       phone,
       caller_id,
       call_reason,
-      assigned_department
+      assigned_department,
+      creation_date
     };
 
     try {
