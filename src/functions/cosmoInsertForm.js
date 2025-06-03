@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const crypto = require('crypto');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, error, badRequest } = require('../shared/responseUtils');
 
 app.http('cosmoInsertForm', {
   methods: ['POST'],
@@ -13,7 +14,7 @@ app.http('cosmoInsertForm', {
       body = await request.json();
     } catch (err) {
       context.log('❌ Error al parsear JSON:', err);
-      return { status: 400, body: 'Formato JSON inválido' };
+      return badRequest('Formato JSON inválido', err.message);
     }
 
     const form = body.form;
@@ -23,10 +24,7 @@ app.http('cosmoInsertForm', {
     const missingFields = requiredFields.filter(field => !form?.[field]);
 
     if (missingFields.length > 0) {
-      return {
-        status: 400,
-        body: `Missing fields: ${missingFields.join(', ')}`
-      };
+      return badRequest(`Faltan campos obligatorios: ${missingFields.join(', ')}`);
     }
 
     // 3. Preparar campos
@@ -37,7 +35,7 @@ app.http('cosmoInsertForm', {
     const collaborators = [];
 
     const summary = form.summary;
-    const status = form.status?.trim() || "New"; // Si no hay status, se pone "new"
+    const status = form.status?.trim() || "New";
     const patient_name = form.patient_name;
     const patient_dob = form.patient_dob;
     const phone = form.from_number;
@@ -64,44 +62,35 @@ app.http('cosmoInsertForm', {
 
     // 5. Ensamblar documento a insertar
     const itemToInsert = {
-        tickets: ticketId,
-        id: ticketId,
-        agent_assigned,
-        tiket_source,
-        collaborators,
-        notes,
-        timestamp: new Date().toISOString(),
-        summary,
-        status,
-        patient_name,
-        patient_dob,
-        phone,
-        caller_id,
-        call_reason,
+      tickets: ticketId,
+      id: ticketId,
+      agent_assigned,
+      tiket_source,
+      collaborators,
+      notes,
+      timestamp: new Date().toISOString(),
+      summary,
+      status,
+      patient_name,
+      patient_dob,
+      phone,
+      caller_id,
+      call_reason,
     };
 
     try {
       const container = getContainer();
 
-      // 6. Insertar en Cosmos DB usando la clave de partición correcta
+      // 6. Insertar en Cosmos DB
       const { resource } = await container.items.create(itemToInsert, {
         partitionKey: ticketId
       });
 
-      return {
-        status: 201,
-        body: {
-          message: 'New ticket created successfully',
-          tickets: JSON.stringify(ticketId)
-        }
-      };
+      return success('New ticket created successfully', { ticketId }, 201);
 
-    } catch (error) {
-      context.log('❌ Error inserting on CosmosDB:', error);
-      return {
-        status: 500,
-        body: `Error inserting in database: ${error.message}`
-      };
+    } catch (err) {
+      context.log('❌ Error inserting on CosmosDB:', err);
+      return error('Error inserting in database', 500, err.message);
     }
   }
 });
