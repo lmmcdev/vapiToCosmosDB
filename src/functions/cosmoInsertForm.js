@@ -77,6 +77,7 @@ app.http('cosmoInsertForm', {
       phone,
       caller_id,
       call_reason,
+      assigned_department
     };
 
     try {
