@@ -25,7 +25,7 @@ app.http('cosmoInsertForm', {
     if (missingFields.length > 0) {
       return {
         status: 400,
-        body: `Faltan campos obligatorios: ${missingFields.join(', ')}`
+        body: `Missing fields: ${missingFields.join(', ')}`
       };
     }
 
