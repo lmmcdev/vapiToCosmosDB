@@ -19,7 +19,7 @@ app.http('cosmoInsertForm', {
     const form = body.form;
 
     // 2. Validar campos obligatorios
-    const requiredFields = ['summary', 'patient_name', 'patient_dob', 'caller_id'];
+    const requiredFields = ['summary', 'patient_name', 'patient_dob', 'caller_id', 'agent_email'];
     const missingFields = requiredFields.filter(field => !form?.[field]);
 
     if (missingFields.length > 0) {
@@ -37,7 +37,7 @@ app.http('cosmoInsertForm', {
     const collaborators = [];
 
     const summary = form.summary;
-    const status = form.status?.trim() || "new"; // Si no hay status, se pone "new"
+    const status = form.status?.trim() || "New"; // Si no hay status, se pone "new"
     const patient_name = form.patient_name;
     const patient_dob = form.patient_dob;
     const phone = form.from_number;
@@ -50,7 +50,7 @@ app.http('cosmoInsertForm', {
       {
         datetime: date.toISOString(),
         event_type: "system_log",
-        event: "New ticket created"
+        event: `New ticket created by ${form.agent_email}`
       }
     ];
 
@@ -91,16 +91,16 @@ app.http('cosmoInsertForm', {
       return {
         status: 201,
         body: {
-          message: 'Item insertado correctamente',
+          message: 'New ticket created successfully',
           tickets: JSON.stringify(ticketId)
         }
       };
 
     } catch (error) {
-      context.log('❌ Error al insertar en Cosmos DB:', error);
+      context.log('❌ Error inserting on CosmosDB:', error);
       return {
         status: 500,
-        body: `Error al insertar en la base de datos: ${error.message}`
+        body: `Error inserting in database: ${error.message}`
       };
     }
   }
