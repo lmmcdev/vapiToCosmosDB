@@ -18,7 +18,6 @@ app.http('cosmoUpdatePatientPhone', {
       return badRequest('Missing parameters: tickets, agent_email or new_phone.');
     }
 
-    // Validar número de teléfono de EE. UU.
     const phoneRegex = /^(\+1\s?)?(\([2-9][0-9]{2}\)|[2-9][0-9]{2})[\s.-]?[0-9]{3}[\s.-]?[0-9]{4}$/;
     if (!phoneRegex.test(new_phone)) {
       return badRequest('Invalid US phone number format. (e.g., 555-123-4567 or (555) 123-4567)');
@@ -27,25 +26,38 @@ app.http('cosmoUpdatePatientPhone', {
     const container = getContainer();
 
     try {
-      const item = container.item(tickets, tickets);
+      const itemRef = container.item(tickets, tickets);
+      const { resource: doc } = await itemRef.read();
 
-      await item.patch([
-        {
+      const patchOps = [];
+
+      // Determinar si usar 'add' o 'replace' en /phone
+      if (doc.phone === undefined) {
+        patchOps.push({
+          op: 'add',
+          path: '/phone',
+          value: new_phone
+        });
+      } else {
+        patchOps.push({
           op: 'replace',
           path: '/phone',
           value: new_phone
-        },
-        {
-          op: 'add',
-          path: '/notes/-',
-          value: {
-            datetime: new Date().toISOString(),
-            event_type: 'system_log',
-            agent_email,
-            event: `Patient phone changed to "${new_phone}"`
-          }
+        });
+      }
+
+      patchOps.push({
+        op: 'add',
+        path: '/notes/-',
+        value: {
+          datetime: new Date().toISOString(),
+          event_type: 'system_log',
+          agent_email,
+          event: `Patient phone changed to "${new_phone}"`
         }
-      ]);
+      });
+
+      await itemRef.patch(patchOps);
 
       return success('Phone number updated successfully.');
     } catch (err) {
