@@ -12,7 +12,8 @@
     "@azure/functions": "^4.7.2",
     "@azure/identity": "^4.10.0",
     "@microsoft/signalr": "^8.0.7",
-    "dayjs": "^1.11.13"
+    "dayjs": "^1.11.13",
+    "dayjs-plugin-utc": "^0.1.2"
   },
   "devDependencies": {
     "azure-functions-core-tools": "^4.x"
