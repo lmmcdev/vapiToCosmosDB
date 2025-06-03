@@ -1,3 +1,8 @@
+const { app } = require('@azure/functions');
+const { getContainer } = require('../shared/cosmoClient');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
+const { success, badRequest, notFound, error, unauthorized } = require('../shared/responseUtils');
+
 app.http('cosmoGet', {
   methods: ['GET'],
   authLevel: 'anonymous',
