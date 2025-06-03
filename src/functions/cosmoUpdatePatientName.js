@@ -11,7 +11,6 @@ app.http('cosmoUpdatePatientName', {
     try {
       ({ tickets, agent_email, nuevo_nombreapellido } = await req.json());
     } catch (err) {
-
       return badRequest('Invalid JSON');
     }
 
@@ -25,21 +24,25 @@ app.http('cosmoUpdatePatientName', {
     try {
       const { resource: existing } = await item.read();
 
-      /*const path = existing?.message?.analysis?.structuredData;
-      if (!path) {
-        return badRequest('No se encontró la estructura message.analysis.structuredData.');
-      }*/
-
       const anterior = existing.patient_name || 'Unknown';
-
       const patchOps = [];
 
-      patchOps.push({
-        op: 'replace',
-        path: '/patient_name',
-        value: nuevo_nombreapellido
-      });
+      // Añadir o reemplazar /patient_name
+      if (existing.patient_name === undefined) {
+        patchOps.push({
+          op: 'add',
+          path: '/patient_name',
+          value: nuevo_nombreapellido
+        });
+      } else {
+        patchOps.push({
+          op: 'replace',
+          path: '/patient_name',
+          value: nuevo_nombreapellido
+        });
+      }
 
+      // Asegurar que notes existe
       if (!Array.isArray(existing.notes)) {
         patchOps.push({
           op: 'add',
@@ -61,7 +64,7 @@ app.http('cosmoUpdatePatientName', {
 
       await item.patch(patchOps);
 
-      return success('Operation successfull.', {
+      return success('Operation successful.', {
         nombre_anterior: anterior,
         nombre_nuevo: nuevo_nombreapellido
       });

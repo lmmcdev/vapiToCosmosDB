@@ -27,30 +27,52 @@ app.http('cosmoUpdatePatientBOD', {
 
     try {
       const item = container.item(tickets, tickets);
+      const { resource: existing } = await item.read();
 
-      await item.patch([
-        {
+      const patchOps = [];
+
+      // Añadir o reemplazar /patient_dob
+      if (existing.patient_dob === undefined) {
+        patchOps.push({
+          op: 'add',
+          path: '/patient_dob',
+          value: nueva_fechanacimiento
+        });
+      } else {
+        patchOps.push({
           op: 'replace',
           path: '/patient_dob',
           value: nueva_fechanacimiento
-        },
-        {
-          op: 'add',
-          path: '/notes/-',
-          value: {
-            datetime: new Date().toISOString(),
-            event_type: 'system_log',
-            agent_email,
-            event: `Patient DOB changed to "${nueva_fechanacimiento}"`
-          }
-        }
-      ]);
+        });
+      }
 
-      return success('Operation successfull.');
+      // Asegurar que notes existe
+      if (!Array.isArray(existing.notes)) {
+        patchOps.push({
+          op: 'add',
+          path: '/notes',
+          value: []
+        });
+      }
+
+      patchOps.push({
+        op: 'add',
+        path: '/notes/-',
+        value: {
+          datetime: new Date().toISOString(),
+          event_type: 'system_log',
+          agent_email,
+          event: `Patient DOB changed to "${nueva_fechanacimiento}"`
+        }
+      });
+
+      await item.patch(patchOps);
+
+      return success('Operation successful.');
 
     } catch (err) {
       context.log('❌ Error en PATCH parcial:', err);
-      return error('Error updating patient bod.', 500, err.message);
+      return error('Error updating patient dob.', 500, err.message);
     }
   }
 });
