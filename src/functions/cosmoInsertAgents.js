@@ -17,7 +17,7 @@ app.http('cosmoInsertAgent', {
       return badRequest('Invalid JSON');
     }
 
-    const form = body.form;
+    const form = body;
 
     // 2. Validar campos obligatorios
     const requiredFields = ['agent_name', 'department', 'rol', 'agent_email', 'editor_email'];
