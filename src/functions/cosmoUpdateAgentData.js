@@ -6,6 +6,24 @@ app.http('cosmoUpdateAgent', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
+    const body = await req.json();
+
+    const requiredFields = [
+      'agentId',
+      'editor_email',
+      'agent_name',
+      'agent_email',
+      'agent_rol',
+      'agent_department',
+      'remote_agent'
+    ];
+
+    const missingFields = requiredFields.filter(field => !(field in body));
+
+    if (missingFields.length > 0) {
+      return badRequest(`Missing required parameters: ${missingFields.join(', ')}`);
+    }
+
     const {
       agentId,
       editor_email,
@@ -14,11 +32,7 @@ app.http('cosmoUpdateAgent', {
       agent_rol,
       agent_department,
       remote_agent
-    } = await req.json();
-
-    if (!agentId || !editor_email || !agent_name || !agent_email || !agent_rol || !agent_department || remote_agent === undefined) {
-      return badRequest('Missing required parameters.');
-    }
+    } = body;
 
     try {
       const container = getContainer();
@@ -64,7 +78,6 @@ app.http('cosmoUpdateAgent', {
           value: newValue
         });
 
-        // Log de campo individual
         if (oldValue !== newValue) {
           detailedNotes.push({
             datetime: new Date().toISOString(),
@@ -74,14 +87,12 @@ app.http('cosmoUpdateAgent', {
         }
       }
 
-      // Agrega nota general
       detailedNotes.push({
         datetime: new Date().toISOString(),
         event_type: 'system_log',
         event: `Updated agent by ${editor_email}`
       });
 
-      // Agrega todas las notas
       for (const note of detailedNotes) {
         patchOps.push({
           op: 'add',
