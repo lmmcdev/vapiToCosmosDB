@@ -1,5 +1,5 @@
 const { app } = require('@azure/functions');
-const { getContainer } = require('../shared/cosmoAgentClient');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error, unauthorized } = require('../shared/responseUtils');
 
 app.http('cosmoUpdateAgent', {
@@ -35,7 +35,7 @@ app.http('cosmoUpdateAgent', {
     } = body;
 
     try {
-      const container = getContainer();
+      const container = getAgentContainer();
 
       // Verificar editor
       const editorQuery = {
