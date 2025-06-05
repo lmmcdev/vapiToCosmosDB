@@ -18,7 +18,7 @@ app.http('cosmoGetPhoneHistory', {
 
         const { resources: items } = await container.items
             .query({
-                query: "SELECT c.call_reason, c.caller_id, c.summary, c.creation_date FROM c WHERE c.phone = @phone",
+                query: "SELECT c.call_reason, c.caller_id, c.summary, c.creation_date, c.status FROM c WHERE c.phone = @phone",
                 parameters: [{ name: "@phone", value: phone }]
             })
             .fetchAll();
