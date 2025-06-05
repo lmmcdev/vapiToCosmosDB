@@ -35,13 +35,13 @@ app.http('cosmoUpdatePatientPhone', {
       if (doc.phone === undefined) {
         patchOps.push({
           op: 'add',
-          path: '/phone',
+          path: '/callback_number',
           value: new_phone
         });
       } else {
         patchOps.push({
           op: 'replace',
-          path: '/phone',
+          path: '/callback_number',
           value: new_phone
         });
       }
@@ -53,16 +53,16 @@ app.http('cosmoUpdatePatientPhone', {
           datetime: new Date().toISOString(),
           event_type: 'system_log',
           agent_email,
-          event: `Patient phone changed to "${new_phone}"`
+          event: `Callback number changed to "${new_phone}"`
         }
       });
 
       await itemRef.patch(patchOps);
 
-      return success('Phone number updated successfully.');
+      return success('Callback number updated successfully.');
     } catch (err) {
-      context.log('❌ Error updating phone:', err);
-      return error('Error updating patient phone.', 500, err.message);
+      context.log('❌ Error updating callback number:', err);
+      return error('Error updating callback number.', 500, err.message);
     }
   }
 });
