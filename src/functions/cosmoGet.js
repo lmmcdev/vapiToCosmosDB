@@ -7,6 +7,7 @@ app.http('cosmoGet', {
   methods: ['GET'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
+    
     try {
       const agentEmail = req.query.get('agent_assigned');
       if (!agentEmail) return badRequest("Missing 'agent_assigned' in query.");
