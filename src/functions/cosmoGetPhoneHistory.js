@@ -18,7 +18,7 @@ app.http('cosmoGetPhoneHistory', {
 
         const { resources: items } = await container.items
             .query({
-                query: "SELECT * FROM c WHERE c.phone = @phone",
+                query: "SELECT c.call_reason, c.caller_id, c.summary, c.creation_date FROM c WHERE c.phone = @phone",
                 parameters: [{ name: "@phone", value: phone }]
             })
             .fetchAll();
@@ -26,7 +26,7 @@ app.http('cosmoGetPhoneHistory', {
         return success('Records retrieved successfully', { items });
 
     } catch (err) {
-      context.log('❌ Error al consultar historial por teléfono:', err);
+      context.log('Error al consultar historial por teléfono:', err);
       return error('Error al consultar historial por teléfono', 500, err.message);
     }
   }
