@@ -7,7 +7,7 @@ app.http('cosmoGet', {
   methods: ['GET'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    
+
     try {
       const agentEmail = req.query.get('agent_assigned');
       if (!agentEmail) return badRequest("Missing 'agent_assigned' in query.");
@@ -36,7 +36,7 @@ app.http('cosmoGet', {
                  c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
                  c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
                  c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
-                 c.tiket_source, c.phone
+                 c.tiket_source, c.phone, c.work_time
           FROM c
           WHERE c.assigned_department = @department
             AND LOWER(c.status) != "closed"
@@ -51,7 +51,7 @@ app.http('cosmoGet', {
                  c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
                  c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
                  c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
-                 c.tiket_source, c.phone
+                 c.tiket_source, c.phone, c.work_time
           FROM c
           WHERE (c.agent_assigned = @agentEmail)
              OR (c.agent_assigned = "" AND c.assigned_department = @department)
