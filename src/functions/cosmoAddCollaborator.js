@@ -49,7 +49,7 @@ app.http('cosmoUpdateCollaborators', {
       const added = finalCollaborators.filter(e => !current.includes(e));
 
       if (removed.length === 0 && added.length === 0) {
-        return success('No changes to collaborators.');
+        return badRequest('No changes to collaborators.');
       }
 
       await item.patch([
