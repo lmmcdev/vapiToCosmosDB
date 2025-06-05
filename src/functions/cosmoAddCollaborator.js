@@ -37,19 +37,21 @@ app.http('cosmoUpdateCollaborators', {
 
       const assignedAgent = resource.assigned_agent?.trim().toLowerCase();
 
-      // Excluir al assigned agent del array final
-      const finalCollaborators = incomingClean.filter(e => e !== assignedAgent);
+      // ❌ Validación explícita: el assigned agent no puede estar en los colaboradores
+      if (assignedAgent && incomingClean.includes(assignedAgent)) {
+        return badRequest(`Assigned agent (${assignedAgent}) cannot be a collaborator.`);
+      }
+
+      const finalCollaborators = incomingClean;
 
       // Determinar cambios
       const removed = current.filter(e => !finalCollaborators.includes(e));
       const added = finalCollaborators.filter(e => !current.includes(e));
 
-      // Si no hay cambios reales
       if (removed.length === 0 && added.length === 0) {
         return success('No changes to collaborators.');
       }
 
-      // Patch con nueva lista y nota
       await item.patch([
         {
           op: 'replace',
