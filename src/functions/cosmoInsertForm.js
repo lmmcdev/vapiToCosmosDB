@@ -6,13 +6,20 @@ const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 
-// Extender dayjs con plugins necesarios
+// Extender dayjs
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 app.http('cosmoInsertForm', {
   methods: ['POST'],
   authLevel: 'anonymous',
+  extraOutputs: [
+    {
+      type: 'signalR',
+      name: 'signalRMessages',
+      hubName: 'ticketsHub',
+    },
+  ],
   handler: async (request, context) => {
     let body;
 
@@ -56,19 +63,19 @@ app.http('cosmoInsertForm', {
       {
         datetime: isoMiami,
         event_type: 'system_log',
-        event: `New ticket created by ${form.agent_email}`
-      }
+        event: `New ticket created by ${form.agent_email}`,
+      },
     ];
 
     if (agent_note) {
       notes.push({
         datetime: isoMiami,
         event_type: 'user_log',
-        event: agent_note
+        event: agent_note,
       });
     }
 
-    const itemToInsert = {
+    const newTicket = {
       tickets: ticketId,
       id: ticketId,
       agent_assigned,
@@ -84,19 +91,27 @@ app.http('cosmoInsertForm', {
       caller_id,
       call_reason,
       assigned_department,
-      creation_date
+      creation_date,
     };
 
     try {
       const container = getContainer();
-      const { resource } = await container.items.create(itemToInsert, {
-        partitionKey: ticketId
+      await container.items.create(newTicket, {
+        partitionKey: ticketId,
       });
+
+      // Emitir evento SignalR
+      context.extraOutputs.set('signalRMessages', [
+        {
+          target: 'ticketCreated',
+          arguments: [newTicket],
+        },
+      ]);
 
       return success('New ticket created successfully', { ticketId }, 201);
     } catch (err) {
       context.log('❌ Error inserting on CosmosDB:', err);
       return error('Error inserting in database', 500, err.message);
     }
-  }
+  },
 });
