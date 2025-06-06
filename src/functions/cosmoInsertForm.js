@@ -108,7 +108,7 @@ app.http('cosmoInsertForm', {
         },
       ]);
 
-      return success('New ticket created successfully', { ticketId }, 201);
+      return success('New ticket created successfully', { newTicket }, 201);
     } catch (err) {
       context.log('❌ Error inserting on CosmosDB:', err);
       return error('Error inserting in database', 500, err.message);
