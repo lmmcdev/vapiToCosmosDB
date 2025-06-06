@@ -18,7 +18,11 @@ app.http('cosmoGetPhoneHistory', {
 
         const { resources: items } = await container.items
             .query({
-                query: "SELECT c.call_reason, c.caller_id, c.summary, c.creation_date, c.status FROM c WHERE c.phone = @phone",
+                query: `SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name, 
+                c.patient_dob, c.caller_name, c.callback_number, c.caller_id,c.call_cost, c.notes, 
+                c.collaborators, c.url_audio, c.assigned_department,
+                 c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
+                 c.tiket_source, c.phone, c.work_time FROM c WHERE c.phone = @phone`,
                 parameters: [{ name: "@phone", value: phone }]
             })
             .fetchAll();
