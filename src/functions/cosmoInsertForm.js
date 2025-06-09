@@ -36,7 +36,7 @@ app.http('cosmoInsertForm', {
     const creation_date = now.format('MM/DD/YYYY, HH:mm');
     const ticketId = crypto.randomUUID();
 
-    const phone = form.from_number;
+    const phone = form.phone;
     let agent_assigned = '';
 
     try {
