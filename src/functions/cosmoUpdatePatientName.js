@@ -3,7 +3,7 @@ const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, error, notFound } = require('../shared/responseUtils');
 
-const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
+const signalRUrl = process.env.SIGNALR_BROADCAST_URL2;
 
 app.http('cosmoUpdatePatientName', {
   methods: ['PATCH'],
@@ -113,12 +113,14 @@ app.http('cosmoUpdatePatientName', {
         work_time: updated.work_time
       };
 
+      console.log(signalRUrl)
       try {
         await fetch(signalRUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(responseData)
         });
+        console.log('sent it')
       } catch (e) {
         context.log('⚠️ SignalR failed:', e.message);
       }
