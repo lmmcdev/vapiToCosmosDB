@@ -34,7 +34,7 @@ app.http('cosmoInsertRetel', {
     const now = dayjs().tz('America/New_York');
     const creation_date = now.format('MM/DD/YYYY, HH:mm');
     const ticketId = crypto.randomUUID();
-    const phone = data.from_number;
+    const phone = body.call.from_number;
     let agent_assigned = '';
 
     try {
