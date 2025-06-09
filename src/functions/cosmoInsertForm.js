@@ -39,6 +39,11 @@ app.http('cosmoInsertForm', {
     const phone = form.phone;
     let agent_assigned = '';
 
+    //campo time para comparar fecha
+    const nowEpoch = new Date();
+    const startOfDay = new Date(nowEpoch.getFullYear(), nowEpoch.getMonth(), nowEpoch.getDate()); // hoy a las 00:00
+    const startOfDayEpoch = Math.floor(startOfDay.getTime() / 1000);
+
     try {
       const container = getContainer();
       const { resources: existingTickets } = await container.items
@@ -47,12 +52,11 @@ app.http('cosmoInsertForm', {
             SELECT TOP 1 c.agent_assigned FROM c 
             WHERE c.phone = @phone 
             AND c.status != "Closed" 
-            AND STARTSWITH(c.creation_date, @today)
             ORDER BY c._ts DESC
           `,
           parameters: [
             { name: '@phone', value: phone },
-            { name: '@today', value: now.format('MM/DD/YYYY') }
+            { name: '@startOfDayEpoch', value: startOfDayEpoch } //no corre la fecha, usar en el futuro
           ]
         })
         .fetchAll();
