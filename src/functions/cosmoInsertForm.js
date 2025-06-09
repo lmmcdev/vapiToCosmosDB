@@ -46,7 +46,7 @@ app.http('cosmoInsertForm', {
 
     try {
       const container = getContainer();
-      const { resources: existingTickets } = await container.items
+      /*const { resources: existingTickets } = await container.items
         .query({
           query: `
             SELECT TOP 1 c.agent_assigned FROM c 
@@ -63,7 +63,7 @@ app.http('cosmoInsertForm', {
 
       if (existingTickets.length > 0) {
         agent_assigned = existingTickets[0].agent_assigned || '';
-      }
+      }*/
 
       const newTicket = {
         tickets: ticketId,

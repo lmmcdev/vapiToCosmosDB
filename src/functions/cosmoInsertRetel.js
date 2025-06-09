@@ -46,7 +46,7 @@ app.http('cosmoInsertRetel', {
 
     try {
       const container = getContainer();
-      const { resources } = await container.items
+      /*const { resources } = await container.items
         .query({
           query: `
             SELECT TOP 1 c.agent_assigned FROM c 
@@ -61,7 +61,7 @@ app.http('cosmoInsertRetel', {
         })
         .fetchAll();
 
-      if (resources.length > 0) agent_assigned = resources[0].agent_assigned || '';
+      if (resources.length > 0) agent_assigned = resources[0].agent_assigned || '';*/
 
       const itemToInsert = {
         ...body,
