@@ -10,23 +10,20 @@ const timezone = require('dayjs/plugin/timezone');
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const signalRUrl = process.env.SIGNALR_BROADCAST_URL || 'https://signalrcservices.azurewebsites.net/api/sendTicketMessage';
+const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
 
 app.http('cosmoInsertForm', {
   methods: ['POST'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
     let body;
-
     try {
       body = await request.json();
     } catch (err) {
-      context.log('❌ Error parsing JSON:', err);
       return badRequest('Invalid JSON', err.message);
     }
 
     const form = body.form;
-
     const requiredFields = ['summary', 'patient_name', 'patient_dob', 'caller_id', 'agent_email'];
     const missingFields = requiredFields.filter(field => !form?.[field]);
 
@@ -37,68 +34,71 @@ app.http('cosmoInsertForm', {
     const now = dayjs().tz('America/New_York');
     const isoMiami = now.toISOString();
     const creation_date = now.format('MM/DD/YYYY, HH:mm');
-
     const ticketId = crypto.randomUUID();
 
-    const newTicket = {
-      tickets: ticketId,
-      id: ticketId,
-      agent_assigned: '',
-      tiket_source: 'Form',
-      collaborators: [],
-      timestamp: isoMiami,
-      creation_date,
-      summary: form.summary,
-      status: form.status?.trim() || 'New',
-      patient_name: form.patient_name,
-      patient_dob: form.patient_dob,
-      phone: form.from_number,
-      caller_id: form.caller_id,
-      call_reason: form.call_reason,
-      assigned_department: form.assigned_department,
-      notes: [
-        {
-          datetime: isoMiami,
-          event_type: 'system_log',
-          event: `New ticket created by ${form.agent_email}`,
-        },
-        ...(form.agent_note
-          ? [{
-              datetime: isoMiami,
-              event_type: 'user_log',
-              event: form.agent_note,
-            }]
-          : []),
-      ],
-    };
+    const phone = form.from_number;
+    let agent_assigned = '';
 
     try {
       const container = getContainer();
-      await container.items.create(newTicket, {
-        partitionKey: ticketId,
-      });
+      const { resources: existingTickets } = await container.items
+        .query({
+          query: `
+            SELECT TOP 1 c.agent_assigned FROM c 
+            WHERE c.phone = @phone 
+            AND c.status != "Closed" 
+            AND STARTSWITH(c.creation_date, @today)
+            ORDER BY c._ts DESC
+          `,
+          parameters: [
+            { name: '@phone', value: phone },
+            { name: '@today', value: now.format('MM/DD/YYYY') }
+          ]
+        })
+        .fetchAll();
 
-      try {
-        const res = await fetch(signalRUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newTicket),
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          context.log(`⚠️ SignalR response not OK: ${res.status} - ${errText}`);
-        } else {
-          context.log('✅ SignalR notification sent.');
-        }
-      } catch (signalErr) {
-        context.log('❌ Error sending SignalR message:', signalErr.message);
+      if (existingTickets.length > 0) {
+        agent_assigned = existingTickets[0].agent_assigned || '';
       }
 
-      return success('New ticket created successfully', { ticketId }, 201);
+      const newTicket = {
+        tickets: ticketId,
+        id: ticketId,
+        agent_assigned,
+        tiket_source: 'Form',
+        collaborators: [],
+        timestamp: isoMiami,
+        creation_date,
+        summary: form.summary,
+        status: form.status?.trim() || 'New',
+        patient_name: form.patient_name,
+        patient_dob: form.patient_dob,
+        phone,
+        caller_id: form.caller_id,
+        call_reason: form.call_reason,
+        assigned_department: form.assigned_department,
+        notes: [
+          { datetime: isoMiami, event_type: 'system_log', event: `New ticket created by ${form.agent_email}` },
+          ...(form.agent_note ? [{ datetime: isoMiami, event_type: 'user_log', event: form.agent_note }] : [])
+        ]
+      };
+
+      await container.items.create(newTicket, { partitionKey: ticketId });
+
+      // SignalR
+      try {
+        await fetch(signalRUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newTicket)
+        });
+      } catch (e) {
+        context.log('⚠️ SignalR failed:', e.message);
+      }
+
+      return success('Ticket created', { ticketId }, 201);
     } catch (err) {
-      context.log('❌ Error inserting on CosmosDB:', err);
-      return error('Error inserting in database', 500, err.message);
+      return error('DB Insert error', 500, err.message);
     }
   }
 });

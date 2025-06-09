@@ -1,7 +1,16 @@
 const { app } = require('@azure/functions');
 const crypto = require('crypto');
+const fetch = require('node-fetch');
 const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
+const dayjs = require('dayjs');
+const timezone = require('dayjs/plugin/timezone');
+const utc = require('dayjs/plugin/utc');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
 
 app.http('cosmoInsertRetel', {
   methods: ['POST'],
@@ -9,95 +18,85 @@ app.http('cosmoInsertRetel', {
   handler: async (request, context) => {
     let body;
 
-    // 1. Intentar parsear el JSON
     try {
       body = await request.json();
     } catch (err) {
-      context.log('❌ Error parsing JSON:', err);
       return badRequest('Invalid JSON');
     }
 
-    // 2. Validar y extraer campos
     let data;
     try {
       data = body.call.call_analysis.custom_analysis_data;
     } catch (err) {
-      return badRequest('Can not found node custom_analysis_data, error');
+      return badRequest('Missing custom_analysis_data');
     }
 
-    const date = new Date();
+    const now = dayjs().tz('America/New_York');
+    const creation_date = now.format('MM/DD/YYYY, HH:mm');
     const ticketId = crypto.randomUUID();
-    const status = "New";
-    const agent_assigned = "";
-    const tiket_source = "Phone";
-    const collaborators = [];
-    const notes = [{
-      datetime: date.toISOString(),
-      event_type: "system_log",
-      event: "New ticket created"
-    }];
-
-    const {
-      summary,
-      call_reason,
-      patient_name,
-      dob: patient_dob,
-      caller_name,
-      alternate_contact_number: callback_number,
-      from_number: phone,
-      recording_url: url_audio,
-      agent_name: caller_id,
-      assigned_department,
-      assigned_role,
-      caller_type
-    } = data;
-
-    const start_time = body.call?.start_timestamp;
-    const call_cost_cent = body.call?.call_cost?.combined_cost;
-    const call_duration = body.call?.call_cost?.total_duration_seconds;
-
-    const call_cost = parseFloat((call_cost_cent/100).toFixed(4));
-    //const call_cost = formatter.format(call_cost_centv);
-
-    if (!summary || !call_reason || !start_time || !patient_name) {
-      return badRequest('Your request have missing parameters');
-    }
-
-    const creation_date = new Date(start_time).toLocaleString('en-US', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
-
-    // 3. Armar item a insertar
-    const itemToInsert = {
-      ...body,
-      tickets: ticketId,
-      id: ticketId,
-      summary, call_reason, creation_date, patient_name,
-      patient_dob, caller_name, callback_number, phone,
-      url_audio, caller_id, call_cost, assigned_department,
-      assigned_role, caller_type, call_duration,
-      status,
-      agent_assigned,
-      tiket_source,
-      collaborators,
-      notes,
-      timestamp: new Date().toISOString()
-    };
+    const phone = data.from_number;
+    let agent_assigned = '';
 
     try {
       const container = getContainer();
+      const { resources } = await container.items
+        .query({
+          query: `
+            SELECT TOP 1 c.agent_assigned FROM c 
+            WHERE c.phone = @phone 
+            AND c.status != "Closed" 
+            AND STARTSWITH(c.creation_date, @today)
+            ORDER BY c._ts DESC
+          `,
+          parameters: [
+            { name: '@phone', value: phone },
+            { name: '@today', value: now.format('MM/DD/YYYY') }
+          ]
+        })
+        .fetchAll();
+
+      if (resources.length > 0) agent_assigned = resources[0].agent_assigned || '';
+
+      const itemToInsert = {
+        ...body,
+        tickets: ticketId,
+        id: ticketId,
+        summary: data.summary,
+        call_reason: data.call_reason,
+        creation_date,
+        patient_name: data.patient_name,
+        patient_dob: data.dob,
+        caller_name: data.caller_name,
+        callback_number: data.alternate_contact_number,
+        phone,
+        url_audio: data.recording_url,
+        caller_id: data.agent_name,
+        call_cost: parseFloat((body.call?.call_cost?.combined_cost || 0) / 100).toFixed(4),
+        assigned_department: data.assigned_department,
+        assigned_role: data.assigned_role,
+        caller_type: data.caller_type,
+        call_duration: body.call?.call_cost?.total_duration_seconds,
+        status: 'New',
+        agent_assigned,
+        tiket_source: 'Phone',
+        collaborators: [],
+        notes: [
+          { datetime: now.toISOString(), event_type: 'system_log', event: 'New ticket created' }
+        ],
+        timestamp: now.toISOString()
+      };
+
       await container.items.create(itemToInsert, { partitionKey: ticketId });
 
-      return success('Operation successfull', { tickets: ticketId }, 201);
+      await fetch(signalRUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(itemToInsert)
+      });
 
+      return success('Ticket created', { tickets: ticketId }, 201);
     } catch (err) {
-      context.log('❌ Error al insertar en Cosmos DB:', err);
-      return error('Error, ticket not created', 500, err.message);
+      return error('Insert error', 500, err.message);
     }
   }
 });
