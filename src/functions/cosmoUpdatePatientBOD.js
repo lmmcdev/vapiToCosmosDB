@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { success, badRequest, error } = require('../shared/responseUtils');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
+const { success, badRequest, error, notFound } = require('../shared/responseUtils');
 
 app.http('cosmoUpdatePatientBOD', {
   methods: ['PATCH'],
@@ -11,27 +12,48 @@ app.http('cosmoUpdatePatientBOD', {
     try {
       ({ tickets, agent_email, nueva_fechanacimiento } = await req.json());
     } catch (err) {
-      return badRequest('JSON inválido');
+      return badRequest('Invalid JSON');
     }
 
     if (!tickets || !agent_email || !nueva_fechanacimiento) {
-      return badRequest('Your request have missing parameters: tickets, agent_email or nueva_fechanacimiento.');
+      return badRequest('Missing parameters: tickets, agent_email or nueva_fechanacimiento.');
     }
 
     const fechaRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/;
     if (!fechaRegex.test(nueva_fechanacimiento)) {
-      return badRequest('Invalid date format, please set your date to MM/DD/YYYY (ex. 06/15/1985).');
+      return badRequest('Invalid date format. Use MM/DD/YYYY (e.g., 06/15/1985).');
     }
 
     const container = getContainer();
+    const agentContainer = getAgentContainer();
 
     try {
       const item = container.item(tickets, tickets);
       const { resource: existing } = await item.read();
 
+      if (!existing) return notFound('Ticket not found.');
+
+      // Check permissions
+      const query = {
+        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
+        parameters: [{ name: '@agent_email', value: agent_email }]
+      };
+      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
+      if (!agents.length) return badRequest('Agent not found.');
+
+      const agent = agents[0];
+      const role = agent.agent_role || 'Agent';
+
+      const isAssigned = existing.agent_assigned === agent_email;
+      const isCollaborator = Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email);
+      const isSupervisor = role === 'Supervisor';
+
+      if (!isAssigned && !isCollaborator && !isSupervisor) {
+        return badRequest('You do not have permission to update the patient DOB.');
+      }
+
       const patchOps = [];
 
-      // Añadir o reemplazar /patient_dob
       if (existing.patient_dob === undefined) {
         patchOps.push({
           op: 'add',
@@ -46,7 +68,6 @@ app.http('cosmoUpdatePatientBOD', {
         });
       }
 
-      // Asegurar que notes existe
       if (!Array.isArray(existing.notes)) {
         patchOps.push({
           op: 'add',
@@ -68,11 +89,11 @@ app.http('cosmoUpdatePatientBOD', {
 
       await item.patch(patchOps);
 
-      return success('Operation successful.');
+      return success('Patient DOB updated successfully.');
 
     } catch (err) {
-      context.log('❌ Error en PATCH parcial:', err);
-      return error('Error updating patient dob.', 500, err.message);
+      context.log('❌ Error updating patient DOB:', err);
+      return error('Error updating patient DOB.', 500, err.message);
     }
   }
 });

@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { success, badRequest, error } = require('../shared/responseUtils');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
+const { success, badRequest, error, notFound } = require('../shared/responseUtils');
 
 app.http('cosmoUpdatePatientName', {
   methods: ['PATCH'],
@@ -15,16 +16,37 @@ app.http('cosmoUpdatePatientName', {
     }
 
     if (!tickets || !agent_email || !nuevo_nombreapellido) {
-      return badRequest('Your request have missing parameters: tickets, agent_email or nuevo_nombreapellido');
+      return badRequest('Missing parameters: tickets, agent_email or nuevo_nombreapellido.');
     }
 
     const container = getContainer();
+    const agentContainer = getAgentContainer();
     const item = container.item(tickets, tickets);
 
     try {
       const { resource: existing } = await item.read();
+      if (!existing) return notFound('Ticket not found.');
 
-      const anterior = existing.patient_name || 'Unknown';
+      // Obtener rol del agente
+      const query = {
+        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
+        parameters: [{ name: '@agent_email', value: agent_email }]
+      };
+      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
+
+      if (!agents.length) return badRequest('Agent not found.');
+      const agent = agents[0];
+      const role = agent.agent_role || 'Agent';
+
+      const isAssigned = existing.agent_assigned === agent_email;
+      const isCollaborator = Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email);
+      const isSupervisor = role === 'Supervisor';
+
+      if (!isAssigned && !isCollaborator && !isSupervisor) {
+        return badRequest('You do not have permission to update the patient name.');
+      }
+
+      const previousName = existing.patient_name || 'Unknown';
       const patchOps = [];
 
       if (existing.patient_name === undefined) {
@@ -56,16 +78,14 @@ app.http('cosmoUpdatePatientName', {
           datetime: new Date().toISOString(),
           event_type: 'system_log',
           agent_email,
-          event: `Patient name changed from "${anterior}" to "${nuevo_nombreapellido}"`
+          event: `Patient name changed from "${previousName}" to "${nuevo_nombreapellido}"`
         }
       });
 
       await item.patch(patchOps);
 
-      // Releer el documento actualizado
       const { resource: updated } = await item.read();
 
-      // Solo devolver los campos necesarios
       const responseData = {
         id: updated.id,
         summary: updated.summary,
@@ -91,11 +111,11 @@ app.http('cosmoUpdatePatientName', {
         work_time: updated.work_time
       };
 
-      return success('Ticket updated successfully.', responseData);
+      return success('Patient name updated successfully.', responseData);
 
     } catch (err) {
-      context.log('❌ Error al actualizar nombreapellido_paciente (PATCH):', err);
-      return error('Error.', 500, err.message);
+      context.log('❌ Error updating patient name:', err);
+      return error('Internal server error.', 500, err.message);
     }
   }
 });
