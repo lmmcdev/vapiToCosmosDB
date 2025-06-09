@@ -1,5 +1,6 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 
 app.http('cosmoUpdateNotes', {
@@ -11,18 +12,17 @@ app.http('cosmoUpdateNotes', {
     try {
       ({ ticketId, notes, agent_email, event } = await req.json());
     } catch (err) {
-      return badRequest('Invalid JSON');
+      return badRequest('Invalid JSON.');
     }
 
     if (!ticketId || !agent_email) {
-      return badRequest('Your request has missing parameters: ticketId or agent_email.');
+      return badRequest('Missing parameters: ticketId or agent_email.');
     }
 
     if (!Array.isArray(notes) && !event) {
-      return badRequest('Missing notes or malformed array.');
+      return badRequest('Missing notes array or event.');
     }
 
-    // Validar que todas las notas tengan agent_email
     if (Array.isArray(notes)) {
       for (const [i, note] of notes.entries()) {
         if (
@@ -35,27 +35,39 @@ app.http('cosmoUpdateNotes', {
       }
     }
 
-    const container = getContainer();
-    const item = container.item(ticketId, ticketId);
+    const ticketContainer = getContainer();
+    const agentContainer = getAgentContainer();
+    const ticketItem = ticketContainer.item(ticketId, ticketId);
 
     try {
-      const { resource: existing } = await item.read();
+      const { resource: ticket } = await ticketItem.read();
+      if (!ticket) return notFound('Ticket not found.');
 
-      if (!existing) {
-        return notFound('Ticket not found.');
+      // Fetch agent info
+      const query = {
+        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
+        parameters: [{ name: '@agent_email', value: agent_email }]
+      };
+      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
+      if (!agents.length) return badRequest('Agent not found.');
+
+      const agent = agents[0];
+      const role = agent.agent_role || 'Agent';
+
+      const isAssigned = ticket.agent_assigned === agent_email;
+      const isCollaborator = Array.isArray(ticket.collaborators) && ticket.collaborators.includes(agent_email);
+      const isSupervisor = role === 'Supervisor';
+
+      if (!isAssigned && !isCollaborator && !isSupervisor) {
+        return badRequest('You do not have permission to update notes on this ticket.');
       }
 
       const patchOps = [];
 
-      if (!Array.isArray(existing.notes)) {
-        patchOps.push({
-          op: 'add',
-          path: '/notes',
-          value: []
-        });
+      if (!Array.isArray(ticket.notes)) {
+        patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
-      // Agregar notas válidas
       if (Array.isArray(notes) && notes.length > 0) {
         for (const note of notes) {
           patchOps.push({
@@ -95,12 +107,12 @@ app.http('cosmoUpdateNotes', {
       }
 
       if (patchOps.length === 0) {
-        return badRequest('No notes or event to add.');
+        return badRequest('No valid operations to apply.');
       }
 
-      await item.patch(patchOps);
+      await ticketItem.patch(patchOps);
 
-      return success('Operation successful.', {
+      return success('Notes updated successfully.', {
         applied_operations: patchOps.length
       });
 
