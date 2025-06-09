@@ -3,7 +3,7 @@ const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, error, notFound } = require('../shared/responseUtils');
 
-const signalRUrl = process.env.SIGNALR_BROADCAST_URL2;
+const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('cosmoUpdatePatientName', {
   methods: ['PATCH'],
