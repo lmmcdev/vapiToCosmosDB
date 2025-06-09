@@ -113,14 +113,12 @@ app.http('cosmoUpdatePatientName', {
         work_time: updated.work_time
       };
 
-      console.log(signalRUrl)
       try {
         await fetch(signalRUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(responseData)
         });
-        console.log('sent it')
       } catch (e) {
         context.log('⚠️ SignalR failed:', e.message);
       }
