@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { success, badRequest, error } = require('../shared/responseUtils');
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
+const { success, badRequest, error, notFound } = require('../shared/responseUtils');
 
 app.http('cosmoUpdatePatientPhone', {
   methods: ['PATCH'],
@@ -24,15 +25,35 @@ app.http('cosmoUpdatePatientPhone', {
     }
 
     const container = getContainer();
+    const agentContainer = getAgentContainer();
+    const itemRef = container.item(tickets, tickets);
 
     try {
-      const itemRef = container.item(tickets, tickets);
       const { resource: doc } = await itemRef.read();
+      if (!doc) return notFound('Ticket not found.');
+
+      // Obtener rol del agente
+      const query = {
+        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
+        parameters: [{ name: '@agent_email', value: agent_email }]
+      };
+      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
+
+      if (!agents.length) return badRequest('Agent not found.');
+      const agent = agents[0];
+      const role = agent.agent_role || 'Agent';
+
+      const isAssigned = doc.agent_assigned === agent_email;
+      const isCollaborator = Array.isArray(doc.collaborators) && doc.collaborators.includes(agent_email);
+      const isSupervisor = role === 'Supervisor';
+
+      if (!isAssigned && !isCollaborator && !isSupervisor) {
+        return badRequest('You do not have permission to update this ticket\'s callback number.');
+      }
 
       const patchOps = [];
 
-      // Determinar si usar 'add' o 'replace' en /phone
-      if (doc.phone === undefined) {
+      if (doc.callback_number === undefined) {
         patchOps.push({
           op: 'add',
           path: '/callback_number',
