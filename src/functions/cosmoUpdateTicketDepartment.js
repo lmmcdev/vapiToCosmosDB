@@ -64,6 +64,8 @@ app.http('cosmoUpdateTicketDepartment', {
       patchOps.push({ op: 'replace', path: '/assigned_department', value: newDepartment });
       patchOps.push({ op: 'replace', path: '/agent_assigned', value: '' });
       patchOps.push({ op: 'replace', path: '/collaborators', value: [] });
+      patchOps.push({ op: 'replace', path: '/status', value: "New" });
+
       
 
       const changedBy = isSupervisor
