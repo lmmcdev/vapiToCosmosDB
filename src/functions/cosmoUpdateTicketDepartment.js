@@ -1,56 +1,73 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
-const { success, badRequest, notFound, error, unauthorized } = require('../shared/responseUtils');
+const { success, error, badRequest, notFound } = require('../shared/responseUtils');
+
+const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('cosmoUpdateTicketDepartment', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    const { ticketId, new_department, agent_email } = await req.json();
-
-    if (!ticketId || !new_department || !agent_email) {
-      return badRequest('Missing parameters: ticketId, new_department, or agent_email.');
-    }
+    let ticketId, newDepartment, agent_email;
 
     try {
-      const agentContainer = getAgentContainer();
-      const ticketContainer = getContainer();
+      ({ ticketId, newDepartment, agent_email } = await req.json());
+    } catch {
+      return badRequest('Invalid JSON payload.');
+    }
 
-      // Buscar al agente
-      const { resources: agentResult } = await agentContainer.items
-        .query({
-          query: "SELECT * FROM c WHERE c.agent_email = @agentEmail",
-          parameters: [{ name: "@agentEmail", value: agent_email }]
-        })
-        .fetchAll();
+    if (!ticketId || !newDepartment || !agent_email) {
+      return badRequest('Missing parameters: ticketId, newDepartment, or agent_email.');
+    }
 
-      if (!agentResult.length) {
-        return notFound('Agent not found.');
+    const ticketContainer = getContainer();
+    const agentContainer = getAgentContainer();
+    const ticketItem = ticketContainer.item(ticketId, ticketId);
+
+    try {
+      const { resource: ticket } = await ticketItem.read();
+      if (!ticket) return notFound('Ticket not found.');
+
+      // Fetch agent role from database
+      const query = {
+        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
+        parameters: [{ name: '@agent_email', value: agent_email }]
+      };
+
+      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
+      if (!agents.length) return badRequest('Agent not found in the system.');
+
+      const agentData = agents[0];
+      const agentRole = agentData.agent_role || 'Agent';
+
+      // Validate permissions
+      const isAssignedAgent = ticket.agent_assigned === agent_email;
+      const isCollaborator = Array.isArray(ticket.collaborators) && ticket.collaborators.includes(agent_email);
+      const isSupervisor = agentRole === 'Supervisor';
+
+      if (!isAssignedAgent && !isCollaborator && !isSupervisor) {
+        return badRequest('You do not have permission to update this ticket.');
       }
 
-      const agent = agentResult[0];
-      if (agent.agent_rol !== 'Supervisor') {
-        return unauthorized('Only supervisors can update ticket departments.');
+      if (ticket.assigned_department === newDepartment) {
+        return badRequest('The department is already set to the desired value.');
       }
 
-      // Leer el ticket
-      const item = ticketContainer.item(ticketId, ticketId);
-      const { resource } = await item.read();
-      if (!resource) return notFound('Ticket not found.');
-
-      const previousDepartment = resource.assigned_department || 'Unassigned';
-
+      // Build patch operations
       const patchOps = [];
 
-      // Si no existe assigned_department => agregar, si existe => reemplazar
-      if (resource.hasOwnProperty('assigned_department')) {
-        patchOps.push({ op: 'replace', path: '/assigned_department', value: new_department });
-      } else {
-        patchOps.push({ op: 'add', path: '/assigned_department', value: new_department });
+      if (!Array.isArray(ticket.notes)) {
+        patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
-      patchOps.push({ op: 'replace', path: '/agent_assigned', value: '' });
+      patchOps.push({ op: 'replace', path: '/assigned_department', value: newDepartment });
+
+      const changedBy = isSupervisor
+        ? 'Supervisor'
+        : isCollaborator
+        ? 'Collaborator'
+        : 'Assigned Agent';
 
       patchOps.push({
         op: 'add',
@@ -58,16 +75,55 @@ app.http('cosmoUpdateTicketDepartment', {
         value: {
           datetime: new Date().toISOString(),
           event_type: 'system_log',
-          event: `Department changed from "${previousDepartment}" to "${new_department}" by ${agent_email}`
+          agent_email,
+          event: `Department changed from "${ticket.assigned_department || 'None'}" to "${newDepartment}" by ${changedBy}.`
         }
       });
 
-      await item.patch(patchOps);
+      await ticketItem.patch(patchOps);
 
-      return success('Ticket department updated successfully.');
+      const { resource: updated } = await ticketItem.read();
+
+      const responseData = {
+        id: updated.id,
+        summary: updated.summary,
+        call_reason: updated.call_reason,
+        creation_date: updated.creation_date,
+        patient_name: updated.patient_name,
+        patient_dob: updated.patient_dob,
+        caller_name: updated.caller_name,
+        callback_number: updated.callback_number,
+        caller_id: updated.caller_id,
+        call_cost: updated.call_cost,
+        notes: updated.notes,
+        collaborators: updated.collaborators,
+        url_audio: updated.url_audio,
+        assigned_department: updated.assigned_department,
+        assigned_role: updated.assigned_role,
+        caller_type: updated.caller_type,
+        call_duration: updated.call_duration,
+        status: updated.status,
+        agent_assigned: updated.agent_assigned,
+        tiket_source: updated.tiket_source,
+        phone: updated.phone,
+        work_time: updated.work_time
+      };
+
+      try {
+        await fetch(signalRUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(responseData)
+        });
+      } catch (e) {
+        context.log('⚠️ SignalR failed:', e.message);
+      }
+
+      return success('Department updated successfully.', responseData);
+
     } catch (err) {
-      context.log('❌ Error updating ticket:', err);
-      return error('Error updating ticket department.', 500, err.message);
+      context.log('❌ Error updating department:', err);
+      return error('Unexpected error while updating the department.', 500, err.message);
     }
   }
 });
