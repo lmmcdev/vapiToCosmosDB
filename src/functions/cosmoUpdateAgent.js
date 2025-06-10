@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { success, badRequest, error } = require('../shared/responseUtils'); // ⚠️ Usa badRequest aquí también
+const { getAgentContainer } = require('../shared/cosmoAgentClient');
+const { success, badRequest, error } = require('../shared/responseUtils');
 
 app.http('assignAgent', {
   methods: ['PATCH'],
@@ -9,22 +10,41 @@ app.http('assignAgent', {
     let tickets, agent_email, target_agent_email;
 
     try {
-      ({ tickets, agent_email, target_agent_email } = await req.json());
+      ({ tickets, agent_email } = await req.json());
     } catch (err) {
-      return badRequest('Invalid JSON'); // ✅ Usa badRequest
+      return badRequest('Invalid JSON');
     }
 
-    if (!tickets || !agent_email || !target_agent_email) {
-      return badRequest('Your request must include: tickets, agent_email, and target_agent_email'); // ✅ Usa badRequest correctamente
+    if (!tickets || !agent_email) {
+      return badRequest('Your request must include: tickets, agent_email');
     }
 
     const container = getContainer();
+    const agentContainer = getAgentContainer();
     const item = container.item(tickets, tickets);
 
     try {
-      const { resource: existing } = await item.read();
-      if (!existing) {
-        return error('Ticket not found.', {}, 404); // ✅ Usa status válido
+      const { resource: ticket } = await item.read();
+      if (!ticket) {
+        return badRequest('Ticket not found.');
+      }
+
+      // Obtener datos del agente
+      const query = {
+        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
+        parameters: [{ name: '@agent_email', value: agent_email }]
+      };
+      const { resources: agent } = await agentContainer.items.query(query).fetchAll();
+      //const agentItem = agentContainer.item(agent_email, agent_email);
+      //const { resource: agent } = await agentItem.read();
+      if (!agent) {
+        return badRequest(`Target agent not found (${agent_email})`);
+      }
+      console.log(agent[0].agent_department)
+      // Validar coincidencia de departamentos
+      if (ticket.assigned_department && agent[0].agent_department !== ticket.assigned_department) {
+        return badRequest(
+          `Agent's department (${agent[0].agent_department}) does not match ticket's assigned department (${ticket.assigned_department}).`);
       }
 
       const patchOperations = [];
@@ -32,10 +52,10 @@ app.http('assignAgent', {
       patchOperations.push({
         op: 'replace',
         path: '/agent_assigned',
-        value: target_agent_email
+        value: agent_email
       });
 
-      if (!Array.isArray(existing.notes)) {
+      if (!Array.isArray(ticket.notes)) {
         patchOperations.push({
           op: 'add',
           path: '/notes',
@@ -50,19 +70,19 @@ app.http('assignAgent', {
           datetime: new Date().toISOString(),
           event_type: 'system_log',
           agent_email,
-          event: `Assigned agent to the ticket: ${target_agent_email}`
+          event: `Assigned agent to the ticket: ${agent_email}`
         }
       });
 
       await item.patch(patchOperations);
 
       return success('Operation successful.', {
-        assigned_agent: target_agent_email
+        assigned_agent: agent_email
       });
 
     } catch (err) {
       context.log('❌ Error in assignAgent (PATCH):', err);
-      return error('Error assigning agent.', 500, err.message); // ✅ Status y mensaje correctos
+      return error('Error assigning agent.', 500, err.message);
     }
   }
 });

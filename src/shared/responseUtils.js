@@ -11,6 +11,11 @@ function success(message, data = {}, status = 200) {
 }
 
 function error(message, status = 500, details = null, code = null) {
+  const numericStatus = Number(status);
+  if (isNaN(numericStatus) || numericStatus < 200 || numericStatus > 599) {
+    throw new RangeError(`Invalid status code: ${status}`);
+  }
+
   const body = {
     success: false,
     message,
@@ -20,11 +25,12 @@ function error(message, status = 500, details = null, code = null) {
   if (code) body.error_code = code;
 
   return {
-    status,
+    status: numericStatus,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)  // 👈 Aseguramos que sea string
+    body: JSON.stringify(body)
   };
 }
+
 
 function badRequest(message, details = null) {
   return error(message, 400, details);  // 👈 Devuelve JSON.stringify desde error()
