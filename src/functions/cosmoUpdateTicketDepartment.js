@@ -39,7 +39,7 @@ app.http('cosmoUpdateTicketDepartment', {
       if (!agents.length) return badRequest('Agent not found in the system.');
 
       const agentData = agents[0];
-      const agentRole = agentData.agent_role || 'Agent';
+      const agentRole = agentData.agent_rol || 'Agent';
 
       // Validate permissions
       const isAssignedAgent = ticket.agent_assigned === agent_email;

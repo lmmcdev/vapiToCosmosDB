@@ -52,7 +52,7 @@ app.http('cosmoUpdateNotes', {
       if (!agents.length) return badRequest('Agent not found.');
 
       const agent = agents[0];
-      const role = agent.agent_role || 'Agent';
+      const role = agent.agent_rol || 'Agent';
 
       const isAssigned = ticket.agent_assigned === agent_email;
       const isCollaborator = Array.isArray(ticket.collaborators) && ticket.collaborators.includes(agent_email);

@@ -41,7 +41,7 @@ app.http('cosmoUpdatePatientPhone', {
 
       if (!agents.length) return badRequest('Agent not found.');
       const agent = agents[0];
-      const role = agent.agent_role || 'Agent';
+      const role = agent.agent_rol || 'Agent';
 
       const isAssigned = doc.agent_assigned === agent_email;
       const isCollaborator = Array.isArray(doc.collaborators) && doc.collaborators.includes(agent_email);
