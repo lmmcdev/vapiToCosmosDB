@@ -18,7 +18,7 @@ app.http('cosmoUpdateTicketDepartment', {
     }
 
     if (!ticketId || !newDepartment || !agent_email) {
-      return badRequest('Missing parameters: ticketId, newDepartment, or agent_email.');
+      return badRequest('Missing parameters: ticketId, new_department, or agent_email.');
     }
 
     const ticketContainer = getContainer();
