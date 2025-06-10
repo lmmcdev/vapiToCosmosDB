@@ -18,7 +18,7 @@ app.http('cosmoUpdateTicketDepartment', {
     }
 
     if (!ticketId || !newDepartment || !agent_email) {
-      return badRequest('Missing parameters: ticketId, new_department, or agent_email.');
+      return badRequest('Missing parameters: ticketId, newDepartment, or agent_email.');
     }
 
     const ticketContainer = getContainer();
@@ -62,6 +62,9 @@ app.http('cosmoUpdateTicketDepartment', {
       }
 
       patchOps.push({ op: 'replace', path: '/assigned_department', value: newDepartment });
+      patchOps.push({ op: 'replace', path: '/agent_assigned', value: '' });
+      patchOps.push({ op: 'replace', path: '/collaborators', value: [] });
+      
 
       const changedBy = isSupervisor
         ? 'Supervisor'
