@@ -5,6 +5,9 @@ const { success, error, badRequest, notFound } = require('../shared/responseUtil
 const isValidEmail = (email) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
+const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+
+
 app.http('cosmoUpdateCollaborators', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
@@ -69,6 +72,44 @@ app.http('cosmoUpdateCollaborators', {
           }
         }
       ]);
+
+      const { resource: updated } = await item.read();
+
+      const responseData = {
+        id: updated.id,
+        summary: updated.summary,
+        call_reason: updated.call_reason,
+        creation_date: updated.creation_date,
+        patient_name: updated.patient_name,
+        patient_dob: updated.patient_dob,
+        caller_name: updated.caller_name,
+        callback_number: updated.callback_number,
+        caller_id: updated.caller_id,
+        call_cost: updated.call_cost,
+        notes: updated.notes,
+        collaborators: updated.collaborators,
+        url_audio: updated.url_audio,
+        assigned_department: updated.assigned_department,
+        assigned_role: updated.assigned_role,
+        caller_type: updated.caller_type,
+        call_duration: updated.call_duration,
+        status: updated.status,
+        agent_assigned: updated.agent_assigned,
+        tiket_source: updated.tiket_source,
+        phone: updated.phone,
+        work_time: updated.work_time
+      };
+
+      try {
+        await fetch(signalRUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(responseData)
+        });
+        console.log('sending signalr')
+      } catch (e) {
+        context.log('⚠️ SignalR failed:', e.message);
+      }
 
       return success('Collaborators updated.', { added, removed });
     } catch (err) {
