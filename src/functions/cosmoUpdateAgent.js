@@ -42,7 +42,6 @@ app.http('assignAgent', {
       if (!agent) {
         return badRequest(`Target agent not found (${agent_email})`);
       }
-      console.log(agent[0].agent_department)
       // Validar coincidencia de departamentos
       if (ticket.assigned_department && agent[0].agent_department !== ticket.assigned_department) {
         return badRequest(
