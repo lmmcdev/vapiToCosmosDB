@@ -15,7 +15,8 @@ app.http('cosmoUpdateAgent', {
       'agent_email',
       'agent_rol',
       'agent_department',
-      'remote_agent'
+      'remote_agent',
+      'disabled_agent'
     ];
 
     const missingFields = requiredFields.filter(field => !(field in body));
@@ -31,7 +32,8 @@ app.http('cosmoUpdateAgent', {
       agent_email,
       agent_rol,
       agent_department,
-      remote_agent
+      remote_agent,
+      disabled_agent
     } = body;
 
     try {
@@ -66,7 +68,8 @@ app.http('cosmoUpdateAgent', {
         agent_email,
         agent_rol,
         agent_department,
-        remote_agent
+        remote_agent,
+        disabled_agent
       };
 
       for (const [key, newValue] of Object.entries(fieldsToUpdate)) {
