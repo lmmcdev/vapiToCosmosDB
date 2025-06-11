@@ -63,6 +63,8 @@ app.http('cosmoUpdateAgent', {
       const patchOps = [];
       const detailedNotes = [];
 
+      disabled_agent ? agent_email = agent_email : agent_email = '';
+
       const fieldsToUpdate = {
         agent_name,
         agent_email,
