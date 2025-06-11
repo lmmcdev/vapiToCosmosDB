@@ -63,16 +63,18 @@ app.http('cosmoUpdateAgent', {
       const patchOps = [];
       const detailedNotes = [];
 
-      disabled_agent ? agent_email = agent_email : agent_email = '';
+      const email_managed = disabled_agent ? '' : agent_email;
+
 
       const fieldsToUpdate = {
         agent_name,
-        agent_email,
+        agent_email: email_managed,
         agent_rol,
         agent_department,
-        remote_agent,
-        disabled_agent
+        remote_agent
       };
+
+      console.log(fieldsToUpdate);
 
       for (const [key, newValue] of Object.entries(fieldsToUpdate)) {
         const oldValue = agent[key];
