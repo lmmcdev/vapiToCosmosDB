@@ -90,11 +90,15 @@ app.http('cosmoInsertVapi', {
 
       await container.items.create(itemToInsert, { partitionKey: ticketId });
 
-      await fetch(signalRUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(itemToInsert)
-      });
+      try {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(itemToInsert)
+          });
+      } catch (e) {
+          context.log('⚠️ SignalR failed:', e.message);
+      }
 
       return success('Ticket created', { tickets: ticketId }, 201);
     } catch (err) {
