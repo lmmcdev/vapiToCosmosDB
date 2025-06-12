@@ -59,7 +59,7 @@ app.http('cosmoInsertForm', {
         timestamp: createdAt, // coherente con createdAt
         notes: [
           { datetime: createdAt, event_type: 'system_log', event: `New ticket created by ${form.agent_email}` },
-          ...(form.agent_note ? [{ datetime: createdAt, event_type: 'user_log', event: form.agent_note }] : [])
+          ...(form.agent_note ? [{ datetime: createdAt, event_type: 'user_note', event: form.agent_note }] : [])
         ]
       };
 
