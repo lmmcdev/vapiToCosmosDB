@@ -78,7 +78,7 @@ app.http('cosmoUpdateNotes', {
             value: {
               ...note,
               datetime: note.datetime || new Date().toISOString(),
-              event_type: note.event_type || 'user_log'
+              event_type: note.event_type || 'user_note'
             }
           });
         }
