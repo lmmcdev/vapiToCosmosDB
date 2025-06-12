@@ -68,7 +68,7 @@ app.http('cosmoInsertForm', {
       const newTicket = {
         tickets: ticketId,
         id: ticketId,
-        agent_assigned: agent_email,
+        agent_assigned: form.agent_email,
         tiket_source: 'Form',
         collaborators: [],
         timestamp: isoMiami,
