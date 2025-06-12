@@ -10,6 +10,7 @@ const utc = require('dayjs/plugin/utc');
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
 
 app.http('cosmoInsertRetel', {
@@ -31,37 +32,17 @@ app.http('cosmoInsertRetel', {
       return badRequest('Missing custom_analysis_data');
     }
 
-    const now = dayjs().tz('America/New_York');
-    const creation_date = now.format('MM/DD/YYYY, HH:mm');
+    // Fecha actual en zona horaria de Miami
+    const nowMiami = dayjs().tz(MIAMI_TZ);
+    const createdAt = nowMiami.utc().toISOString(); // UTC ISO para filtros y ordenamiento
+    const creation_date = nowMiami.format('MM/DD/YYYY, HH:mm'); // Amigable para UI
+
     const ticketId = crypto.randomUUID();
     const phone = body.call.from_number;
     let agent_assigned = '';
 
-    //campo time para comparar fecha
-    const nowEpoch = new Date();
-    const startOfDay = new Date(nowEpoch.getFullYear(), nowEpoch.getMonth(), nowEpoch.getDate()); // hoy a las 00:00
-    const startOfDayEpoch = Math.floor(startOfDay.getTime() / 1000);
-
-
-
     try {
       const container = getContainer();
-      /*const { resources } = await container.items
-        .query({
-          query: `
-            SELECT TOP 1 c.agent_assigned FROM c 
-            WHERE c.phone = @phone 
-            AND c.status != "Closed" 
-            ORDER BY c._ts DESC
-          `,
-          parameters: [
-            { name: '@phone', value: phone },
-            { name: '@startOfDayEpoch', value: startOfDayEpoch } //no corre la fecha, usar en el futuro
-          ]
-        })
-        .fetchAll();
-
-      if (resources.length > 0) agent_assigned = resources[0].agent_assigned || '';*/
 
       const itemToInsert = {
         ...body,
@@ -69,7 +50,8 @@ app.http('cosmoInsertRetel', {
         id: ticketId,
         summary: data.summary,
         call_reason: data.call_reason,
-        creation_date,
+        createdAt, // para filtros
+        creation_date, // para UI
         patient_name: data.patient_name,
         patient_dob: data.dob,
         caller_name: data.caller_name,
@@ -87,21 +69,22 @@ app.http('cosmoInsertRetel', {
         tiket_source: 'Phone',
         collaborators: [],
         notes: [
-          { datetime: now.toISOString(), event_type: 'system_log', event: 'New ticket created' }
+          { datetime: createdAt, event_type: 'system_log', event: 'New ticket created' }
         ],
-        timestamp: now.toISOString()
+        timestamp: createdAt // mantener coherencia
       };
 
       await container.items.create(itemToInsert, { partitionKey: ticketId });
 
+      // SignalR broadcast
       try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(itemToInsert)
-          });
+        await fetch(signalRUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(itemToInsert)
+        });
       } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
+        context.log('⚠️ SignalR failed:', e.message);
       }
 
       return success('Ticket created', { tickets: ticketId }, 201);

@@ -3,12 +3,8 @@ const { getContainer } = require('../shared/cosmoClient');
 const { success, error } = require('../shared/responseUtils');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
-const timezone = require('dayjs/plugin/timezone');
 
 dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const MIAMI_TZ = 'America/New_York';
 
 app.http('cosmoGetStats', {
   methods: ['GET'],
@@ -17,28 +13,30 @@ app.http('cosmoGetStats', {
     try {
       const container = getContainer();
 
-      // Obtener fecha base en zona horaria de Miami
       const dateParam = req.query.get('date'); // formato esperado: YYYY-MM-DD
-      const baseDate = dateParam
-        ? dayjs.tz(dateParam, MIAMI_TZ)
-        : dayjs().tz(MIAMI_TZ).startOf('day');
+      const isValidDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam);
 
-      const startOfDay = baseDate.startOf('day');
-      const endOfDay = baseDate.add(1, 'day').startOf('day');
+      const baseDate = isValidDate
+        ? dayjs.utc(dateParam).startOf('day')
+        : dayjs.utc().startOf('day');
 
-      // Obtener todos los tickets
-      //??????????????
-      const { resources: allTickets } = await container.items
-        .query('SELECT * FROM c')
+      const startOfDayISO = baseDate.toISOString();
+      const endOfDayISO = baseDate.add(1, 'day').toISOString();
+
+      const query = {
+        query: `
+          SELECT * FROM c
+          WHERE c.createdAt >= @startOfDay AND c.createdAt < @endOfDay
+        `,
+        parameters: [
+          { name: '@startOfDay', value: startOfDayISO },
+          { name: '@endOfDay', value: endOfDayISO }
+        ]
+      };
+
+      const { resources: filteredTickets } = await container.items
+        .query(query)
         .fetchAll();
-
-      // Filtrar tickets cuya fecha en formato "MM/DD/YYYY, HH:mm" esté dentro del rango
-      const filteredTickets = allTickets.filter(ticket => {
-        if (!ticket.creation_date) return false;
-
-        const ticketDate = dayjs.tz(ticket.creation_date, 'MM/DD/YYYY, HH:mm', MIAMI_TZ);
-        return ticketDate.isValid() && ticketDate.isAfter(startOfDay) && ticketDate.isBefore(endOfDay);
-      });
 
       const stats = {
         total: 0,

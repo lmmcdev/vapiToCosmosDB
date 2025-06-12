@@ -10,6 +10,7 @@ const timezone = require('dayjs/plugin/timezone');
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
 
 app.http('cosmoInsertVapi', {
@@ -24,40 +25,29 @@ app.http('cosmoInsertVapi', {
       return badRequest('Invalid JSON');
     }
 
-    if (!body?.message?.analysis?.summary || !body?.message?.call?.createdAt) {
-      return badRequest('Missing summary or createdAt');
+    if (!body?.message?.analysis?.summary) {
+      return badRequest('Missing summary');
     }
 
-    const now = dayjs().tz('America/New_York');
-    const creation_date = body.message.call.createdAt;
+    const rawCreatedAt = body.message.call?.createdAt;
+
+    // Validar formato de fecha entrante, o usar fecha actual si falta o es inválida
+    let createdAt;
+    try {
+      createdAt = rawCreatedAt && dayjs(rawCreatedAt).isValid()
+        ? dayjs(rawCreatedAt).utc().toISOString()
+        : dayjs().tz(MIAMI_TZ).utc().toISOString();
+    } catch {
+      createdAt = dayjs().tz(MIAMI_TZ).utc().toISOString();
+    }
+
+    const creation_date = dayjs(createdAt).tz(MIAMI_TZ).format('MM/DD/YYYY, HH:mm');
     const ticketId = crypto.randomUUID();
     const phone = body.message.call?.customer?.number;
     let agent_assigned = '';
 
-    //campo time para comparar fecha
-    const nowEpoch = new Date();
-    const startOfDay = new Date(nowEpoch.getFullYear(), nowEpoch.getMonth(), nowEpoch.getDate()); // hoy a las 00:00
-    const startOfDayEpoch = Math.floor(startOfDay.getTime() / 1000);
-
-
     try {
       const container = getContainer();
-      /*const { resources } = await container.items
-        .query({
-          query: `
-            SELECT TOP 1 c.agent_assigned FROM c 
-            WHERE c.phone = @phone 
-            AND c.status != "Closed" 
-            ORDER BY c._ts DESC
-          `,
-          parameters: [
-            { name: '@phone', value: phone },
-            { name: '@startOfDayEpoch', value: startOfDayEpoch } //no corre la fecha, usar en el futuro
-          ]
-        })
-        .fetchAll();
-
-      if (resources.length > 0) agent_assigned = resources[0].agent_assigned || '';*/
 
       const itemToInsert = {
         ...body,
@@ -65,7 +55,8 @@ app.http('cosmoInsertVapi', {
         id: ticketId,
         summary: body.message.analysis.summary,
         call_reason: body.message.analysis.structuredData?.razon_llamada,
-        creation_date,
+        createdAt, // estándar para filtros
+        creation_date, // amigable para UI
         patient_name: body.message.analysis.structuredData?.nombreapellido_paciente,
         patient_dob: body.message.analysis.structuredData?.fechanacimiento_paciente,
         caller_name: body.message.analysis.structuredData?.nombreapellidos_familiar,
@@ -83,21 +74,21 @@ app.http('cosmoInsertVapi', {
         tiket_source: 'Phone',
         collaborators: [],
         notes: [
-          { datetime: now.toISOString(), event_type: 'system_log', event: 'New ticket created' }
+          { datetime: createdAt, event_type: 'system_log', event: 'New ticket created' }
         ],
-        timestamp: now.toISOString()
+        timestamp: createdAt // coherente con el resto
       };
 
       await container.items.create(itemToInsert, { partitionKey: ticketId });
 
       try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(itemToInsert)
-          });
+        await fetch(signalRUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(itemToInsert)
+        });
       } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
+        context.log('⚠️ SignalR failed:', e.message);
       }
 
       return success('Ticket created', { tickets: ticketId }, 201);

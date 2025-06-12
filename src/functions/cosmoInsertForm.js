@@ -10,6 +10,7 @@ const timezone = require('dayjs/plugin/timezone');
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
 
 app.http('cosmoInsertForm', {
@@ -31,39 +32,13 @@ app.http('cosmoInsertForm', {
       return badRequest(`Missing required fields: ${missingFields.join(', ')}`);
     }
 
-    const now = dayjs().tz('America/New_York');
-    const isoMiami = now.toISOString();
-    const creation_date = now.format('MM/DD/YYYY, HH:mm');
+    const nowMiami = dayjs().tz(MIAMI_TZ);
+    const createdAt = nowMiami.utc().toISOString(); // Fecha en UTC para queries y filtros
+    const creation_date = nowMiami.format('MM/DD/YYYY, HH:mm'); // Fecha amigable para UI
     const ticketId = crypto.randomUUID();
-
-    const phone = form.phone;
-    let agent_assigned = '';
-
-    //campo time para comparar fecha
-    const nowEpoch = new Date();
-    const startOfDay = new Date(nowEpoch.getFullYear(), nowEpoch.getMonth(), nowEpoch.getDate()); // hoy a las 00:00
-    const startOfDayEpoch = Math.floor(startOfDay.getTime() / 1000);
 
     try {
       const container = getContainer();
-      /*const { resources: existingTickets } = await container.items
-        .query({
-          query: `
-            SELECT TOP 1 c.agent_assigned FROM c 
-            WHERE c.phone = @phone 
-            AND c.status != "Closed" 
-            ORDER BY c._ts DESC
-          `,
-          parameters: [
-            { name: '@phone', value: phone },
-            { name: '@startOfDayEpoch', value: startOfDayEpoch } //no corre la fecha, usar en el futuro
-          ]
-        })
-        .fetchAll();
-
-      if (existingTickets.length > 0) {
-        agent_assigned = existingTickets[0].agent_assigned || '';
-      }*/
 
       const newTicket = {
         tickets: ticketId,
@@ -71,25 +46,26 @@ app.http('cosmoInsertForm', {
         agent_assigned: form.agent_email,
         tiket_source: 'Form',
         collaborators: [],
-        timestamp: isoMiami,
-        creation_date,
+        createdAt, // usado para filtros
+        creation_date, // usado para UI
         summary: form.summary,
         status: form.status?.trim() || 'New',
         patient_name: form.patient_name,
         patient_dob: form.patient_dob,
-        phone,
+        phone: form.phone,
         caller_id: form.caller_id,
         call_reason: form.call_reason,
         assigned_department: form.assigned_department,
+        timestamp: createdAt, // coherente con createdAt
         notes: [
-          { datetime: isoMiami, event_type: 'system_log', event: `New ticket created by ${form.agent_email}` },
-          ...(form.agent_note ? [{ datetime: isoMiami, event_type: 'user_log', event: form.agent_note }] : [])
+          { datetime: createdAt, event_type: 'system_log', event: `New ticket created by ${form.agent_email}` },
+          ...(form.agent_note ? [{ datetime: createdAt, event_type: 'user_log', event: form.agent_note }] : [])
         ]
       };
 
       await container.items.create(newTicket, { partitionKey: ticketId });
 
-      // SignalR
+      // SignalR broadcast
       try {
         await fetch(signalRUrl, {
           method: 'POST',
