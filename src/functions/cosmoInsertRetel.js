@@ -57,7 +57,7 @@ app.http('cosmoInsertRetel', {
         caller_name: data.caller_name,
         callback_number: data.alternate_contact_number,
         phone,
-        url_audio: data.recording_url,
+        url_audio: body.call?.recording_url,
         caller_id: data.agent_name,
         call_cost: parseFloat((body.call?.call_cost?.combined_cost || 0) / 100).toFixed(4),
         assigned_department: data.assigned_department,
