@@ -13,9 +13,7 @@
     "@azure/identity": "^4.10.0",
     "@microsoft/signalr": "^8.0.7",
     "dayjs": "^1.11.13",
-    "dayjs-plugin-utc": "^0.1.2",
-    "jsonwebtoken": "^9.0.2",
-    "jwks-rsa": "^3.2.0"
+    "dayjs-plugin-utc": "^0.1.2"
   },
   "devDependencies": {
     "azure-functions-core-tools": "^4.x"
