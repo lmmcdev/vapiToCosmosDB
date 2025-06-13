@@ -26,8 +26,8 @@ const withAuth = (handler) => {
   return async function (context, req) {
     // Accede al header authorization directamente desde req.headers
     const authHeader = req.headers?.authorization || req.headers?.Authorization;
-    //console.log("Headers recibidos:", req.headers);
-    //console.log(util.inspect(req, { showHidden: false, depth: null }));
+    console.log("Headers recibidos:", req.headers);
+    console.log(util.inspect(req, { showHidden: false, depth: null }));
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       context.res = {
