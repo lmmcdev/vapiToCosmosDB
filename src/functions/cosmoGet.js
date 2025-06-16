@@ -3,6 +3,10 @@ const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error, unauthorized } = require('../shared/responseUtils');
 
+/**actualmente se extraen los tickets por agent_email, valorar si con RingSense se extraerian por agent_extension (si el 
+ * nuevo agente va a poder ver los tickets del viejo agente)
+) */
+
 app.http('cosmoGet', {
   methods: ['GET'],
   authLevel: 'anonymous',
@@ -25,7 +29,7 @@ app.http('cosmoGet', {
 
       if (!agentResult.length) return badRequest("Agent not found.");
 
-      const { agent_department, agent_rol } = agentResult[0];
+      const { agent_department, agent_rol, agent_extension } = agentResult[0];
 
       let query, parameters;
 
@@ -53,12 +57,13 @@ app.http('cosmoGet', {
                  c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
                  c.tiket_source, c.phone, c.work_time
           FROM c
-          WHERE (c.agent_assigned = @agentEmail)
+          WHERE (c.agent_assigned = @agentEmail OR c.agent_extension = @agent_extension)
              OR (c.agent_assigned = "" AND c.assigned_department = @department)
         `;
         parameters = [
           { name: "@agentEmail", value: agentEmail },
-          { name: "@department", value: agent_department }
+          { name: "@department", value: agent_department },
+          { name: "@agent_extension", value: agent_extension}
         ];
       }
 
