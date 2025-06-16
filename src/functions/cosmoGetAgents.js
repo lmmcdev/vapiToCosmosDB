@@ -16,7 +16,8 @@ app.http('cosmoGetAgents', {
         querySpec = {
           query: `
             SELECT c.id, c.agent_name, c.agent_email, c.agent_rol,
-                   c.agent_department, c.remote_agent, c.timestamp
+                   c.agent_department, c.remote_agent, c.timestamp,
+                   c.agent_extension
             FROM c
             WHERE c.agent_department = @dept
           `,
@@ -26,7 +27,8 @@ app.http('cosmoGetAgents', {
         querySpec = {
           query: `
             SELECT c.id, c.agent_name, c.agent_email, c.agent_rol,
-                   c.agent_department, c.remote_agent, c.timestamp
+                   c.agent_department, c.remote_agent, c.timestamp,
+                   c.agent_extension
             FROM c
           `
         };
