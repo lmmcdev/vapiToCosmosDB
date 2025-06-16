@@ -77,6 +77,7 @@ app.http('cosmoInsertAgent', {
         agent_email,
         agent_rol: form.rol,
         agent_department: form.department,
+        agent_extension: form.agent_extension,
         remote_agent: form.agent_remote || false,
         timestamp: date.toISOString(),
         notes: [
