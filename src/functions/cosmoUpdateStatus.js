@@ -56,12 +56,30 @@ app.http('cosmoUpdateStatus', {
 
       const patchOps = [];
 
+      // Asegurarse de que el array de notas exista
       if (!Array.isArray(ticket.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
+      // Reemplazar estado
       patchOps.push({ op: 'replace', path: '/status', value: newStatus });
 
+      // 👇 Manejo del campo closedAt
+      if (newStatus === 'Done') {
+        patchOps.push({
+          op: ticket.closedAt ? 'replace' : 'add',
+          path: '/closedAt',
+          value: new Date().toISOString()
+        });
+      } else if (ticket.status === 'Done' && ticket.closedAt) {
+        patchOps.push({
+          op: 'replace',
+          path: '/closedAt',
+          value: null // o '', si prefieres string vacío
+        });
+      }
+
+      // Nota del evento
       patchOps.push({
         op: 'add',
         path: '/notes/-',
@@ -74,7 +92,6 @@ app.http('cosmoUpdateStatus', {
       });
 
       await item.patch(patchOps);
-
       const { resource: updated } = await item.read();
 
       const responseData = {
@@ -102,23 +119,23 @@ app.http('cosmoUpdateStatus', {
         work_time: updated.work_time
       };
 
-      //signalr update ticket
+      // SignalR para actualizar ticket en frontend
       try {
         await fetch(signalRUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(responseData)
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(responseData)
         });
       } catch (e) {
         context.log('⚠️ SignalR failed:', e.message);
       }
 
-      //signalr update stats
+      // SignalR para actualizar estadísticas
       try {
         await fetch(signalRUrlStats, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(responseData)
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(responseData)
         });
       } catch (e) {
         context.log('⚠️ SignalR failed stats:', e.message);
