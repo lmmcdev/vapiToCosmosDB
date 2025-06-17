@@ -5,6 +5,7 @@ const { success, badRequest, notFound, error } = require('../shared/responseUtil
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
+const signalrClosedTicket = process.env.SIGNAL_BROADCAST_URL4;
 
 app.http('cosmoUpdateStatus', {
   methods: ['PATCH'],
@@ -144,6 +145,18 @@ app.http('cosmoUpdateStatus', {
         });
       } catch (e) {
         context.log('⚠️ SignalR failed stats:', e.message);
+      }
+
+      if(newStatus==='Done') {
+        try {
+          await fetch(signalrClosedTicket, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(responseData)
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR failed stats:', e.message);
+        }
       }
 
       return success('Status updated successfully.', {
