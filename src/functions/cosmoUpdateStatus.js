@@ -46,8 +46,14 @@ app.http('cosmoUpdateStatus', {
       const isCollaborator = Array.isArray(ticket.collaborators) && ticket.collaborators.includes(agent_email);
       const isSupervisor = role === 'Supervisor';
 
+      // Reglas de acceso generales
       if (!isAssigned && !isCollaborator && !isSupervisor) {
         return badRequest('You do not have permission to change this ticket\'s status.');
+      }
+
+      // Reglas específicas para "Done"
+      if (newStatus === 'Done' && !isAssigned && !isCollaborator && !isSupervisor) {
+        return badRequest('Only assigned agent, a collaborator, or a supervisor can mark the ticket as Done.');
       }
 
       if (ticket.status === newStatus) {
@@ -56,15 +62,15 @@ app.http('cosmoUpdateStatus', {
 
       const patchOps = [];
 
-      // Asegurarse de que el array de notas exista
+      // Asegurar array de notas
       if (!Array.isArray(ticket.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
-      // Reemplazar estado
+      // Reemplazar status
       patchOps.push({ op: 'replace', path: '/status', value: newStatus });
 
-      // 👇 Manejo del campo closedAt
+      // Manejo del campo closedAt
       if (newStatus === 'Done') {
         patchOps.push({
           op: ticket.closedAt ? 'replace' : 'add',
@@ -75,11 +81,11 @@ app.http('cosmoUpdateStatus', {
         patchOps.push({
           op: 'replace',
           path: '/closedAt',
-          value: null // o '', si prefieres string vacío
+          value: null
         });
       }
 
-      // Nota del evento
+      // Agregar nota de sistema
       patchOps.push({
         op: 'add',
         path: '/notes/-',
@@ -119,7 +125,7 @@ app.http('cosmoUpdateStatus', {
         work_time: updated.work_time
       };
 
-      // SignalR para actualizar ticket en frontend
+      // SignalR notificaciones
       try {
         await fetch(signalRUrl, {
           method: 'POST',
@@ -130,7 +136,6 @@ app.http('cosmoUpdateStatus', {
         context.log('⚠️ SignalR failed:', e.message);
       }
 
-      // SignalR para actualizar estadísticas
       try {
         await fetch(signalRUrlStats, {
           method: 'POST',
