@@ -12,23 +12,15 @@ app.http('cosmoGetProviders', {
       const continuationToken = req.query.continuationToken || undefined;
       const pageSize = parseInt(req.query.limit) || 10;
 
-      const querySpec = {
-        query: `
-          SELECT *
-          FROM c
-        `
-      };
+      const feedOptions = { maxItemCount: pageSize };
+      if (continuationToken) feedOptions.continuationToken = continuationToken;
 
-      const queryIterator = container.items.query(querySpec, { maxItemCount: pageSize });
-
-      // 👉 La clave: fetchNext acepta options para pasar el continuationToken
-      const { resources, continuationToken: nextContinuationToken } = await queryIterator.fetchNext({
-        continuationToken: continuationToken
-      });
+      const iterator = container.items.readAll(feedOptions);
+      const { resources, continuationToken: nextToken } = await iterator.fetchNext();
 
       return success({
         items: resources,
-        continuationToken: nextContinuationToken || null
+        continuationToken: nextToken || null,
       });
 
     } catch (err) {
