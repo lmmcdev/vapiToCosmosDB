@@ -10,7 +10,7 @@ app.http('cosmoGetProviders', {
       const container = getProviderContainer();
 
       const continuationToken = req.query.get('continuationToken') || undefined;
-      const pageSize = parseInt(req.query.get('pageSize')) || 2;
+      const pageSize = parseInt(req.query.get('pageSize')) || 10;
 
       const querySpec = {
         query: `
