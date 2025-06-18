@@ -9,7 +9,6 @@ app.http('cosmoGetProviders', {
     try {
       const container = getProviderContainer();
 
-      // Lee correctamente los parámetros
       const continuationToken = req.query.continuationToken || undefined;
       const pageSize = parseInt(req.query.limit) || 10;
 
@@ -20,14 +19,12 @@ app.http('cosmoGetProviders', {
         `
       };
 
-      // Crear iterador con continuationToken
-      const queryIterator = container.items.query(querySpec, { 
-        maxItemCount: pageSize,
-        continuationToken: continuationToken // << esto es lo que faltaba
-      });
+      const queryIterator = container.items.query(querySpec, { maxItemCount: pageSize });
 
-      // Obtener la siguiente página
-      const { resources, continuationToken: nextContinuationToken } = await queryIterator.fetchNext();
+      // 👉 La clave: fetchNext acepta options para pasar el continuationToken
+      const { resources, continuationToken: nextContinuationToken } = await queryIterator.fetchNext({
+        continuationToken: continuationToken
+      });
 
       return success({
         items: resources,
