@@ -7,12 +7,12 @@ const containerId = process.env.COSMOS_PROVIDER_CONTAINER_ID;
 
 const client = new CosmosClient({ endpoint, key });
 
-const getAgentContainer = () => {
+const getProviderContainer = () => {
   const database = client.database(databaseId);
   return database.container(containerId);
 };
 
-module.exports = { getAgentContainer };
+module.exports = { getProviderContainer };
 
 //LOCALHOST
 /*const { CosmosClient } = require("@azure/cosmos");
