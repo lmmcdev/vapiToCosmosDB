@@ -31,10 +31,10 @@ app.http('searchProviders', {
 
     //const searchEndpoint = 'https://cognitivesearchcservices.search.windows.net';
     //const apiKey = '';
-    const indexName = 'providerscname-index';
+    const indexName = 'cservicesproviders-index';
 
     try {
-      const response = await fetch(`${congnitiveURL}/indexes/${indexName}/docs?api-version=2023-10-01-Preview&search=${query}`,{
+      const response = await fetch(`${congnitiveURL}/indexes/${indexName}/docs?api-version=2025-05-01-Preview&search=${query}`,{
           method: 'GET',
           headers: { 'api-key': cognitiveKEY },
         });
