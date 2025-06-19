@@ -27,6 +27,7 @@ app.http('searchProviders', {
     }
 
     const query = body.query
+    if(query === '*') return badRequest(`Avoid this kind of search parameters`);
 
     //const searchEndpoint = 'https://cognitivesearchcservices.search.windows.net';
     //const apiKey = '';
