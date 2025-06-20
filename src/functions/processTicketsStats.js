@@ -2,7 +2,7 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getStatsContainer } = require('../shared/cosmoStatsClient');
-const { success, error } = require('../shared/response');
+const { success, error } = require('../shared/responseUtils');
 
 app.http('processTicketStats', {
   methods: ['POST'],
