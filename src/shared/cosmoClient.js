@@ -1,4 +1,4 @@
-const { CosmosClient } = require("@azure/cosmos");
+/*const { CosmosClient } = require("@azure/cosmos");
 
 const endpoint = process.env.COSMOS_ENDPOINT;
 const key = process.env.COSMOS_KEY;
@@ -12,14 +12,14 @@ const getContainer = () => {
   return database.container(containerId);
 };
 
-module.exports = { getContainer };
+module.exports = { getContainer };*/
 
 
 //LOCALHOST
-/*const { CosmosClient } = require("@azure/cosmos");
+const { CosmosClient } = require("@azure/cosmos");
 
 const endpoint = "https://lmmccosmos02.documents.azure.com:443/";
-const key = ""; // la clave primaria
+const key = "bqkSDoT1ZqeTDE6lW0GsNvvPg8B9SvgVwSF78OOGGDYWdsQOMwP486LWFjm0aN0mXqO06fbQLYH9ACDbVhcWJA=="; // la clave primaria
 
 const client = new CosmosClient({
   endpoint,
@@ -30,25 +30,4 @@ const getContainer = () => {
   const db = client.database("IAData");
   return db.container("iadata_id");
 };
-module.exports = { getContainer };*/
-
-
-
-/*const { CosmosClient } = require("@azure/cosmos");
-const { DefaultAzureCredential } = require("@azure/identity");
-
-const endpoint = process.env.COSMOS_ENDPOINT; // debe ser igual al sqlEndpoint
-const credential = new DefaultAzureCredential(); // tomará la identidad asignada
-
-const client = new CosmosClient({
-  endpoint,
-  aadCredentials: credential
-});
-
-const getContainer = () => {
-  const db = client.database(process.env.COSMOS_DATABASE_ID);
-  return db.container(process.env.COSMOS_CONTAINER_ID);
-};
-
-module.exports = { getContainer };*/
-
+module.exports = { getContainer };
