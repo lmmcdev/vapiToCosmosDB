@@ -147,7 +147,7 @@ app.http('cosmoUpdateStatus', {
         context.log('⚠️ SignalR failed stats:', e.message);
       }
 
-      if(newStatus==='Done') {
+      if(newStatus==='Done'  || ticket.status === 'Done') {
         try {
           await fetch(signalrClosedTicket, {
             method: 'POST',
