@@ -1,18 +1,16 @@
-// Azure Function: processTicketStats
+// src/processTicketStats.js
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getStatsContainer } = require('../shared/cosmoStatsClient');
 const { success, error } = require('../shared/responseUtils');
 
-app.http('processTicketStats', {
-  methods: ['POST'],
-  authLevel: 'function',
-  handler: async (req, ctx) => {
+app.timer('processTicketStats', {
+  schedule: '0 50 * * * *', // Cada hora en el minuto 0
+  handler: async (myTimer, context) => {
     try {
       const ticketContainer = getContainer();
       const statsContainer = getStatsContainer();
 
-      // Fetch today's tickets
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const isoToday = today.toISOString();
@@ -20,7 +18,10 @@ app.http('processTicketStats', {
       const query = `SELECT * FROM c WHERE c.createdAt >= '${isoToday}'`;
       const { resources: tickets } = await ticketContainer.items.query(query).fetchAll();
 
-      if (tickets.length === 0) return success({ message: 'No tickets to process today' });
+      if (tickets.length === 0) {
+        context.log('No tickets to process today');
+        return;
+      }
 
       let globalTotalTime = 0;
       let resolvedCount = 0;
@@ -72,11 +73,9 @@ app.http('processTicketStats', {
       };
 
       await statsContainer.items.upsert(statDoc);
-
-      return success({ message: 'Stats processed successfully', stats: statDoc });
+      context.log('✅ Stats processed successfully');
     } catch (err) {
-      //ctx.log.error('Error in processTicketStats:', err);
-      return error('Failed to process ticket stats', err);
+      context.log.error('❌ Error processing stats:', err.message);
     }
   }
 });
