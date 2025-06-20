@@ -13,6 +13,28 @@ dayjs.extend(timezone);
 const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
 
+// 🔁 Función con reintentos por throttling
+async function insertWithRetry(container, item, maxRetries = 5) {
+  let attempts = 0;
+
+  while (attempts < maxRetries) {
+    try {
+      return await container.items.create(item, { partitionKey: item.id });
+    } catch (err) {
+      if (err.code === 429) {
+        const waitTime = err.retryAfterInMs || 1000;
+        console.warn(`⏳ Throttled, retrying in ${waitTime} ms... (attempt ${attempts + 1})`);
+        await new Promise(res => setTimeout(res, waitTime));
+        attempts++;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  throw new Error('Max retries reached for insertion.');
+}
+
 app.http('cosmoInsertVapi', {
   methods: ['POST'],
   authLevel: 'anonymous',
@@ -25,13 +47,14 @@ app.http('cosmoInsertVapi', {
       return badRequest('Invalid JSON');
     }
 
+    // ✅ Validación rápida del body
     if (!body?.message?.analysis?.summary) {
-      return badRequest('Missing summary');
+      return badRequest('Missing required field: summary');
     }
 
     const rawCreatedAt = body.message.call?.createdAt;
 
-    // Validar formato de fecha entrante, o usar fecha actual si falta o es inválida
+    // Validar formato de fecha entrante o usar fecha actual
     let createdAt;
     try {
       createdAt = rawCreatedAt && dayjs(rawCreatedAt).isValid()
@@ -76,22 +99,23 @@ app.http('cosmoInsertVapi', {
         notes: [
           { datetime: createdAt, event_type: 'system_log', event: 'New ticket created' }
         ],
-        timestamp: createdAt // coherente con el resto
+        timestamp: createdAt
       };
 
-      await container.items.create(itemToInsert, { partitionKey: ticketId });
+      // 🔁 Insert con reintentos
+      await insertWithRetry(container, itemToInsert);
 
-      try {
-        await fetch(signalRUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(itemToInsert)
-        });
-      } catch (e) {
-        context.log('⚠️ SignalR failed:', e.message);
-      }
+      // 🚀 SignalR asincrónico (no bloquea respuesta)
+      fetch(signalRUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(itemToInsert)
+      }).catch(e => context.log('⚠️ SignalR failed:', e.message));
+
+      context.log(`✅ Ticket ${ticketId} created successfully at ${createdAt}`);
 
       return success('Ticket created', { tickets: ticketId }, 201);
+
     } catch (err) {
       return error('Insert error', 500, err.message);
     }
