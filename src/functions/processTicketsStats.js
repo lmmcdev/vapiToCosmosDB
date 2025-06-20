@@ -75,7 +75,7 @@ app.http('processTicketStats', {
 
       return success({ message: 'Stats processed successfully', stats: statDoc });
     } catch (err) {
-      ctx.log.error('Error in processTicketStats:', err);
+      //ctx.log.error('Error in processTicketStats:', err);
       return error('Failed to process ticket stats', err);
     }
   }
