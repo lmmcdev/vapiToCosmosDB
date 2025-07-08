@@ -12,7 +12,7 @@ dayjs.extend(timezone);
 
 const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
-
+const classifyUrl = process.env.OPENAI_CLASSIFY_TICKET;
 // Batch queue
 const batchQueue = [];
 const BATCH_SIZE = 10;
@@ -100,6 +100,34 @@ app.http('cosmoInsertVapi', {
       return badRequest('Missing summary');
     }
 
+    /////////////////////////////////////////////////////////////////////////////
+    ///openAI Ticket Processing ////////
+    const summary = body.message.analysis.summary;
+
+    // 🔗 Clasificación vía OpenAI
+    let aiClassification = {
+      priority: "normal",
+      risk: "none",
+      category: "General"
+    };
+
+    try {
+      const classifyRes = await fetch(classifyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: summary }),
+      });
+
+      if (classifyRes.ok) {
+        const result = await classifyRes.json();
+        aiClassification = result.result; // por tu openAiClassifyTicket
+      } else {
+        context.log(`Classify fallback: ${classifyRes.status}`);
+      }
+    } catch (err) {
+      context.log(`Classify error: ${err.message}`);
+    }
+
     const rawCreatedAt = body.message.call?.createdAt;
     let createdAt;
 
@@ -139,6 +167,7 @@ app.http('cosmoInsertVapi', {
       agent_assigned: '',
       tiket_source: 'Phone',
       collaborators: [],
+      aiClassification,
       notes: [
         { datetime: createdAt, event_type: 'system_log', event: 'New ticket created' }
       ],
