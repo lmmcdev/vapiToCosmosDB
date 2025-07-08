@@ -122,7 +122,8 @@ app.http('cosmoInsertVapi', {
         const result = await classifyRes.json();
         aiClassification = result.result; // por tu openAiClassifyTicket
       } else {
-        context.log(`Classify fallback: ${JSON.stringify(classifyRes)}`);
+        const errorText = await classifyRes.text();
+        context.log(`Classify fallback: ${errorText}`);
       }
     } catch (err) {
       context.log(`Classify error: ${err.message}`);
