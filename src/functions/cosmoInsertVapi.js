@@ -2,7 +2,7 @@ const { app } = require('@azure/functions');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { getContainer } = require('../shared/cosmoClient');
-const { success, badRequest, error } = require('../shared/responseUtils');
+const { success, badRequest } = require('../shared/responseUtils');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
@@ -12,7 +12,11 @@ dayjs.extend(timezone);
 
 const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
-const classifyUrl = process.env.OPENAI_CLASSIFY_TICKET;
+
+const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+const openaiApiKey = process.env.AZURE_OPENAI_KEY;
+const deployment = "gpt-4.1";
+
 // Batch queue
 const batchQueue = [];
 const BATCH_SIZE = 10;
@@ -22,7 +26,6 @@ let container = null;
 // Retry-safe insert
 async function insertWithRetry(container, item, maxRetries = 5) {
   let attempts = 0;
-
   while (attempts < maxRetries) {
     try {
       return await container.items.create(item, { partitionKey: item.id });
@@ -37,7 +40,6 @@ async function insertWithRetry(container, item, maxRetries = 5) {
       }
     }
   }
-
   throw new Error('Max retries reached for insertion.');
 }
 
@@ -101,10 +103,10 @@ app.http('cosmoInsertVapi', {
     }
 
     /////////////////////////////////////////////////////////////////////////////
-    ///openAI Ticket Processing ////////
+    /// Direct OpenAI Ticket Classification
+    /////////////////////////////////////////////////////////////////////////////
     const summary = body.message.analysis.summary;
 
-    // 🔗 Clasificación vía OpenAI
     let aiClassification = {
       priority: "normal",
       risk: "none",
@@ -112,26 +114,51 @@ app.http('cosmoInsertVapi', {
     };
 
     try {
-      const classifyRes = await fetch(classifyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: summary }),
-      });
+      const classifyRes = await fetch(
+        `${openaiEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=2025-01-01-preview`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': openaiApiKey
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: "system",
+                content: `Eres un clasificador de tickets de pacientes adultos para una clínica de salud.
+                Analiza el resumen de la llamada y devuelve un JSON con:
+                priority (high, normal, low),
+                risk (none, legal, desenrollment possible),
+                category (Move appointment, Transport needed, Appointment confirmation, Services request, New patient, Desenrollment requested, Recipes needed, Need personal attention, New patient direction, General).`
+              },
+              {
+                role: "user",
+                content: `Resumen: "${summary}"`
+              }
+            ],
+            temperature: 0
+          })
+        }
+      );
 
       if (classifyRes.ok) {
         const result = await classifyRes.json();
-        aiClassification = result.result; // por tu openAiClassifyTicket
+        const raw = result.choices[0].message.content.trim();
+        aiClassification = JSON.parse(raw);
       } else {
         const errorText = await classifyRes.text();
-        context.log(`Classify fallback: ${errorText}`);
+        context.log(`OpenAI classify fallback: ${errorText}`);
       }
     } catch (err) {
-      context.log(`Classify error: ${err.message}`);
+      context.log(`OpenAI classify error: ${err.message}`);
     }
 
+    /////////////////////////////////////////////////////////////////////////////
+    /// Build final ticket
+    /////////////////////////////////////////////////////////////////////////////
     const rawCreatedAt = body.message.call?.createdAt;
     let createdAt;
-
     try {
       createdAt = rawCreatedAt && dayjs(rawCreatedAt).isValid()
         ? dayjs(rawCreatedAt).utc().toISOString()
@@ -148,7 +175,7 @@ app.http('cosmoInsertVapi', {
       ...body,
       tickets: ticketId,
       id: ticketId,
-      summary: body.message.analysis.summary,
+      summary,
       call_reason: body.message.analysis.structuredData?.razon_llamada,
       createdAt,
       creation_date,
@@ -176,6 +203,6 @@ app.http('cosmoInsertVapi', {
     };
 
     batchQueue.push(itemToInsert);
-    return success('Ticket received and queued for batch insert', { ticketId });
+    return success('Ticket received and queued for batch insert', { ticketId, aiClassification });
   }
 });
