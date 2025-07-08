@@ -9,7 +9,7 @@ const deployment = "gpt-4.1";
 
 app.http('openAiClassifyTicket', {
   methods: ['POST'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   handler: async (request, context) => {
     try {
       const { text } = await request.json();
