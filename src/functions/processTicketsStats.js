@@ -1,4 +1,3 @@
-// src/processTicketStats.js
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getStatsContainer } = require('../shared/cosmoStatsClient');
@@ -28,6 +27,11 @@ app.timer('processTicketStats', {
       const agentStatsMap = {};
       const hourlyMap = {};
 
+      // Nuevos contadores para AI Classification
+      const priorityMap = {};
+      const riskMap = {};
+      const categoryMap = {};
+
       for (const ticket of tickets) {
         const created = new Date(ticket.createdAt);
         const closed = ticket.closedAt ? new Date(ticket.closedAt) : null;
@@ -46,6 +50,15 @@ app.timer('processTicketStats', {
           agentStatsMap[agent].totalTime += diffMins;
           agentStatsMap[agent].resolved++;
         }
+
+        // Analiza clasificación AI si existe
+        if (ticket.aiClassification) {
+          const { priority, risk, category } = ticket.aiClassification;
+
+          if (priority) priorityMap[priority] = (priorityMap[priority] || 0) + 1;
+          if (risk) riskMap[risk] = (riskMap[risk] || 0) + 1;
+          if (category) categoryMap[category] = (categoryMap[category] || 0) + 1;
+        }
       }
 
       const agentStats = Object.entries(agentStatsMap).map(([agentEmail, stats]) => ({
@@ -60,8 +73,14 @@ app.timer('processTicketStats', {
       })).sort((a, b) => a.hour - b.hour);
 
       const globalStats = {
-        avgResolutionTimeMins: Math.round(globalTotalTime / resolvedCount),
+        avgResolutionTimeMins: resolvedCount ? Math.round(globalTotalTime / resolvedCount) : 0,
         resolvedCount
+      };
+
+      const aiClassificationStats = {
+        priority: priorityMap,
+        risk: riskMap,
+        category: categoryMap
       };
 
       const statDoc = {
@@ -69,11 +88,12 @@ app.timer('processTicketStats', {
         date: new Date().toISOString().split('T')[0],
         agentStats,
         globalStats,
-        hourlyBreakdown
+        hourlyBreakdown,
+        aiClassificationStats // 🔥 Nuevo bloque agregado
       };
 
       await statsContainer.items.upsert(statDoc);
-      context.log('✅ Stats processed successfully');
+      context.log('✅ Stats processed successfully with AI Classification');
     } catch (err) {
       context.log.error('❌ Error processing stats:', err.message);
     }
