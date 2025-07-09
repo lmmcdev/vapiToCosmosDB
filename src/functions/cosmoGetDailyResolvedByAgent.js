@@ -25,18 +25,10 @@ app.http('cosmoGetDailyResolvedByAgent', {
 
       const query = {
         query: `
-          SELECT TOP 20 
-            c.agent_assigned, 
-            COUNT(1) AS resolvedCount
+          SELECT TOP 20 c.agent_assigned, COUNT(1) AS resolvedCount
           FROM c
-          WHERE 
-            IS_DEFINED(c.closedAt) 
-            AND c.closedAt != null 
-            AND c.closedAt >= @start 
-            AND c.closedAt < @end 
-            AND c.status = 'Done'
+          WHERE c.closedAt != null AND c.closedAt >= @start AND c.closedAt < @end AND c.status = 'Done'
           GROUP BY c.agent_assigned
-          ORDER BY resolvedCount DESC
         `,
         parameters: [
           { name: '@start', value: startOfDayISO },
@@ -54,3 +46,16 @@ app.http('cosmoGetDailyResolvedByAgent', {
     }
   },
 });
+
+/*SELECT TOP 20 
+  c.agent_assigned, 
+  COUNT(1) AS resolvedCount
+FROM c
+WHERE 
+  IS_DEFINED(c.closedAt) 
+  AND c.closedAt != null 
+  AND c.closedAt >= @start 
+  AND c.closedAt < @end 
+  AND c.status = 'Done'
+GROUP BY c.agent_assigned
+ORDER BY resolvedCount DESC*/
