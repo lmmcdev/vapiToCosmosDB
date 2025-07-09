@@ -15,7 +15,7 @@ const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
 
 const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const openaiApiKey = process.env.AZURE_OPENAI_KEY;
-const deployment = "gpt-4.1";
+const deployment = "gpt-35-turbo";
 
 // Batch queue
 const batchQueue = [];
@@ -105,8 +105,8 @@ app.http('cosmoInsertVapi', {
     /////////////////////////////////////////////////////////////////////////////
     /// Direct OpenAI Ticket Classification
     /////////////////////////////////////////////////////////////////////////////
-    //const summary = body.message.analysis.summary;
-    const summary = body.message.transcript;
+    const summary = body.message.analysis.summary;
+    //const summary = body.message.transcript;
 
     let aiClassification = {
       priority: "normal",
@@ -127,13 +127,7 @@ app.http('cosmoInsertVapi', {
             messages: [
               {
                 role: "system",
-                content: `Eres un clasificador de tickets de pacientes adultos para una clínica de salud. Tu funcion es analizar el desarollo de la conversacion entre paciente y agente. 
-                Para ello analizaras la transcripcion de la llamada, teniendo en cuenta que la transcripcion del usuario es precedida por la palabra User: y la del agente con AI:
-                y devuelve un JSON con:
-                priority (high, normal, low),
-                risk (none, legal, desenrollment possible),
-                category (Move appointment, Transport needed, Appointment confirmation, Services request, New patient, Desenrollment requested, Recipes needed, Need personal attention, New patient direction, General),
-                agent_behaviour (very good, good, standard, bad, very bad)`
+                content: `Responde SOLO en JSON. Clasifica el resumen: priority (high/normal/low), risk (none/legal/desenrollment), category (transport, appointment, wew patient, desenrollment, personal attention, new direction, others)`
               },
               {
                 role: "user",
