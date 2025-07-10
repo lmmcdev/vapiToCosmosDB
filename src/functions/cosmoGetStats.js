@@ -46,8 +46,8 @@ app.http('cosmoGetStats', {
         Emergency: 0,
         Pending: 0,
         Duplicated: 0,
-        manualCalls: 0,
-        transferred: 0,
+        //manualCalls: 0,
+        //transferred: 0,
       };
 
       for (const ticket of filteredTickets) {
