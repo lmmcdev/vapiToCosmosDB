@@ -57,9 +57,29 @@ app.timer('processTicketStats', {
         if (ticket.aiClassification) {
           const { priority, risk, category } = ticket.aiClassification;
 
-          if (priority) priorityMap[priority] = (priorityMap[priority] || 0) + 1;
-          if (risk) riskMap[risk] = (riskMap[risk] || 0) + 1;
-          if (category) categoryMap[category] = (categoryMap[category] || 0) + 1;
+          if (priority) {
+            if (!priorityMap[priority]) {
+              priorityMap[priority] = { count: 0, ticketIds: [] };
+            }
+            priorityMap[priority].count++;
+            priorityMap[priority].ticketIds.push(ticket.id);
+          }
+
+          if (risk) {
+            if (!riskMap[risk]) {
+              riskMap[risk] = { count: 0, ticketIds: [] };
+            }
+            riskMap[risk].count++;
+            riskMap[risk].ticketIds.push(ticket.id);
+          }
+
+          if (category) {
+            if (!categoryMap[category]) {
+              categoryMap[category] = { count: 0, ticketIds: [] };
+            }
+            categoryMap[category].count++;
+            categoryMap[category].ticketIds.push(ticket.id);
+          }
         }
       }
 
