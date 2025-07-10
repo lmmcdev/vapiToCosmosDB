@@ -95,8 +95,8 @@ app.timer('processTicketStats', {
       };
 
       await statsContainer.items.upsert(statDoc);
-      context.log('✅ Stats processed successfully with AI Classification');
-
+      context.log('Stats processed successfully with AI Classification');
+      context.log(`Data transmited ${statDoc}`)
       // SignalR notificaciones
       try {
         context.log(`Transmiting signalr to ${signalrDailyStats}`)
