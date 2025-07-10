@@ -22,6 +22,7 @@ app.http('cosmoGet', {
       // Buscar el agente logueado
       const { resources: agentResult } = await agentContainer.items
         .query({
+          // agregar filtro en etapa produccion AND c.status != 'Done'
           query: "SELECT * FROM c WHERE c.agent_email = @agentEmail",
           parameters: [{ name: "@agentEmail", value: agentEmail }]
         })
