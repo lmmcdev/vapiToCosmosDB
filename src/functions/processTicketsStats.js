@@ -3,6 +3,8 @@ const { getContainer } = require('../shared/cosmoClient');
 const { getStatsContainer } = require('../shared/cosmoStatsClient');
 const { success, error } = require('../shared/responseUtils');
 
+const signalrDailyStats = process.env.SIGNAL_BROADCAST_URL5
+
 app.timer('processTicketStats', {
   schedule: '0 50 * * * *', // Cada hora en el minuto 0
   handler: async (myTimer, context) => {
@@ -94,6 +96,19 @@ app.timer('processTicketStats', {
 
       await statsContainer.items.upsert(statDoc);
       context.log('✅ Stats processed successfully with AI Classification');
+
+      // SignalR notificaciones
+      try {
+        await fetch(signalrDailyStats, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(statDoc)
+        });
+      } catch (e) {
+        context.log('⚠️ SignalR failed:', e.message);
+      }
+
+
     } catch (err) {
       context.log.error('❌ Error processing stats:', err.message);
     }
