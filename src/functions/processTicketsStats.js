@@ -99,11 +99,13 @@ app.timer('processTicketStats', {
 
       // SignalR notificaciones
       try {
+        context.log(`Transmiting signalr to ${signalrDailyStats}`)
         await fetch(signalrDailyStats, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(statDoc)
         });
+        context.log('Data daily stats transmited to signalR')
       } catch (e) {
         context.log('⚠️ SignalR failed:', e.message);
       }
