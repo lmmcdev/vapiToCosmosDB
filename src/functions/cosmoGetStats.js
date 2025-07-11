@@ -58,16 +58,16 @@ app.http('cosmoGetStats', {
           stats[status]++;
         }
 
-        if (ticket.tiket_source === 'Form') {
+        /*if (ticket.tiket_source === 'Form') {
           stats.manualCalls++;
-        }
+        }*/
 
-        const currentDept = ticket.assigned_department;
-        const dept1 = ticket.call?.call_analysis?.custom_analysis_data?.assigned_department;
-        const dept2 = ticket.message?.analysis?.vapi_assignment;
-        if ((dept1 && dept1 !== currentDept) || (dept2 && dept2 !== currentDept)) {
+        //const currentDept = ticket.assigned_department;
+        //const dept1 = ticket.call?.call_analysis?.custom_analysis_data?.assigned_department;
+        //const dept2 = ticket.message?.analysis?.vapi_assignment;
+        /*if ((dept1 && dept1 !== currentDept) || (dept2 && dept2 !== currentDept)) {
           stats.transferred++;
-        }
+        }*/
       }
 
       return success(stats);
