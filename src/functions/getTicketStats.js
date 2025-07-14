@@ -11,37 +11,43 @@ app.http('getTicketStats', {
       const container = getStatsContainer();
       const params = req.query;
 
-      const dateFrom = params.get('date_from');
-      const dateTo = params.get('date_to');
+      const date = params.get('date');    // Día exacto
+      const month = params.get('month');  // Mes exacto
 
       let query;
 
-      if (dateFrom || dateTo) {
-        // Validar formato de fechas
-        if (!dayjs(dateFrom, 'YYYY-MM-DD', true).isValid() || !dayjs(dateTo, 'YYYY-MM-DD', true).isValid()) {
-          return badRequest('date_from and date_to must be in YYYY-MM-DD format');
+      if (date) {
+        if (!dayjs(date, 'YYYY-MM-DD', true).isValid()) {
+          return badRequest('The date must be in YYYY-MM-DD format.');
         }
 
-        // Consulta con rango
-        query = `
-          SELECT * FROM c
-          WHERE c.date >= "${dateFrom}" AND c.date <= "${dateTo}"
-          ORDER BY c.date ASC
-        `;
+        query = `SELECT * FROM c WHERE c.date = "${date}"`;
+        ctx.log(`Executing daily query: ${query}`);
+
+      } else if (month) {
+        if (!dayjs(month, 'YYYY-MM', true).isValid()) {
+          return badRequest('The month must be in YYYY-MM format.');
+        }
+
+        const monthKey = `month-${month}`;
+        query = `SELECT * FROM c WHERE c.id = "${monthKey}"`;
+        ctx.log(`Executing monthly query: ${query}`);
+
       } else {
-        // Sin rango: usar el día actual
         const today = dayjs().format('YYYY-MM-DD');
         query = `SELECT * FROM c WHERE c.date = "${today}"`;
+        ctx.log(`Executing default query: ${query}`);
       }
 
       const { resources } = await container.items.query(query).fetchAll();
 
+      ctx.log(`Query returned ${resources.length} results`);
+
       if (!resources.length) {
-        return success({ message: 'No statistics found for the given range' }, 204);
+        return success({ message: 'No statistics found for the given date or month.' }, 204);
       }
 
-      const result = (dateFrom && dateTo) ? resources : resources[0];
-      return success(result);
+      return success(resources[0]);
 
     } catch (err) {
       ctx.log.error('Error fetching stats:', err);
