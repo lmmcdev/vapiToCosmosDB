@@ -127,7 +127,7 @@ app.http('cosmoInsertVapi', {
             messages: [
               {
                 role: "system",
-                content: `Responde SOLO en JSON con priority (low = consulta general, medium = importante pero no urgente, high = SOLO emergencias), risk (none, legal, desenrollment), y category (solo se permiten: transport, appointment, new patient, desenrollment, customer service, new address, hospitalization, others).`
+                content: `Responde SOLO en JSON con priority (low = consulta general, medium = importante pero no urgente, high = SOLO emergencias), risk (none, legal, disenrollment), y category (solo se permiten: transport, appointment, new patient, disenrollment, customer service, new address, hospitalization, others).`
               },
               {
                 role: "user",
