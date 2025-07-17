@@ -1,17 +1,12 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
-const { success, badRequest, notFound, error, unauthorized } = require('../shared/responseUtils');
-
-/**actualmente se extraen los tickets por agent_email, valorar si con RingSense se extraerian por agent_extension (si el 
- * nuevo agente va a poder ver los tickets del viejo agente)
-) */
+const { success, badRequest, error } = require('../shared/responseUtils');
 
 app.http('cosmoGet', {
   methods: ['GET'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-
     try {
       const agentEmail = req.query.get('agent_assigned');
       if (!agentEmail) return badRequest("Missing 'agent_assigned' in query.");
@@ -19,10 +14,9 @@ app.http('cosmoGet', {
       const agentContainer = getAgentContainer();
       const ticketContainer = getContainer();
 
-      // Buscar el agente logueado
+      // ✅ Buscar el agente logueado
       const { resources: agentResult } = await agentContainer.items
         .query({
-          // agregar filtro en etapa produccion AND c.status != 'Done'
           query: "SELECT * FROM c WHERE c.agent_email = @agentEmail",
           parameters: [{ name: "@agentEmail", value: agentEmail }]
         })
@@ -35,22 +29,22 @@ app.http('cosmoGet', {
       let query, parameters;
 
       if (agent_rol === "Supervisor") {
-        // Supervisor: obtiene todos los tickets de su departamento que no están cerrados
+        // ✅ Supervisor: obtiene tickets de su departamento que NO están en Done
         query = `
           SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
                  c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
                  c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
                  c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
-                 c.tiket_source, c.phone, c.work_time, c.aiClassification
+                 c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt
           FROM c
           WHERE c.assigned_department = @department
-            AND LOWER(c.status) != "closed"
+            AND LOWER(c.status) != "done"
         `;
         parameters = [
           { name: "@department", value: agent_department }
         ];
       } else {
-        // Agente regular: tickets asignados a él o sin asignar pero de su departamento
+        // ✅ Agente: tickets asignados a él (email o extensión) O sin asignar pero de su departamento, y que NO estén en Done
         query = `
           SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
                  c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
@@ -58,13 +52,16 @@ app.http('cosmoGet', {
                  c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
                  c.tiket_source, c.phone, c.work_time
           FROM c
-          WHERE (c.agent_assigned = @agentEmail OR c.agent_extension = @agent_extension)
-             OR (c.agent_assigned = "" AND c.assigned_department = @department)
+          WHERE (
+                  (c.agent_assigned = @agentEmail OR c.agent_extension = @agent_extension)
+                  OR (c.agent_assigned = "" AND c.assigned_department = @department)
+                )
+            AND LOWER(c.status) != "done"
         `;
         parameters = [
           { name: "@agentEmail", value: agentEmail },
           { name: "@department", value: agent_department },
-          { name: "@agent_extension", value: agent_extension}
+          { name: "@agent_extension", value: agent_extension }
         ];
       }
 
