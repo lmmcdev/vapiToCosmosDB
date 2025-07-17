@@ -22,7 +22,7 @@ app.http('cosmoGetByIds', {
       // Construir consulta IN dinámicamente
       const inClause = ticketIds.map((_, i) => `@id${i}`).join(', ');
       const query = `
-        SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
+        SELECT c.id, c.summary, c.tickets, c.call_reason, c.creation_date, c.patient_name,
                c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
                c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
                c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
