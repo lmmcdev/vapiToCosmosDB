@@ -7,9 +7,11 @@ app.http('cosmoGetByIds', {
   authLevel: 'anonymous',
   handler: async (req, context) => {
     try {
-      // Leer arreglo de IDs del cuerpo de la petición
+      // Leer body
       const body = await req.json();
       const ticketIds = body.ticketIds;
+      const continuationToken = body.continuationToken || null;
+      const limit = parseInt(body.limit) || 10;
 
       if (!Array.isArray(ticketIds) || ticketIds.length === 0) {
         return badRequest("Missing or empty 'ticketIds' array in request body.");
@@ -35,14 +37,23 @@ app.http('cosmoGetByIds', {
         value: id
       }));
 
-      const { resources: tickets } = await ticketContainer.items
-        .query({ query, parameters })
-        .fetchAll();
+      // Configurar paginación
+      const options = {
+        maxItemCount: limit,
+        continuationToken
+      };
 
-      return success(tickets);
+      // Ejecutar query paginada
+      const iterator = ticketContainer.items.query({ query, parameters }, options);
+      const { resources: items, continuationToken: nextToken } = await iterator.fetchNext();
+
+      return success({
+        items,
+        continuationToken: nextToken || null,
+      });
     } catch (err) {
       context.log('❌ Error al consultar tickets por IDs:', err);
-      return error('Error al consultar tickets por IDs', err);
+      return badRequest('Error al consultar tickets por IDs', err);
     }
   }
 });
