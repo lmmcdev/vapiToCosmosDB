@@ -24,7 +24,7 @@ app.http('cosmoGetTicketsByStatus', {
       const statusParam = body.status || 'In Progress';
       const dateParam = body.date; // formato esperado: YYYY-MM-DD
       const continuationToken = body.continuationToken || null;
-      const limit = parseInt(body.limit) || 5;
+      const limit = parseInt(body.limit) || 10;
 
       // Validar fecha
       const isValidDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam);
