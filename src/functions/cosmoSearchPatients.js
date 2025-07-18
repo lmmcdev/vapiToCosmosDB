@@ -26,15 +26,17 @@ app.http('searchPatients', {
       return badRequest(`Missing required fields: ${missingFields.join(', ')}`);
     }
 
-    const query = body.query
+    const { query, page = 1, size = 10 } = body;
     if(query === '*') return badRequest(`Avoid this kind of search parameters`);
 
     //const searchEndpoint = 'https://cognitivesearchcservices.search.windows.net';
     //const apiKey = '';
     const indexName = 'cservicespatientsmdvita-index';
+    
+    const skip = (page - 1) * size;
 
     try {
-      const response = await fetch(`${congnitiveURL}/indexes/${indexName}/docs?api-version=2025-05-01-Preview&search=${query}`,{
+      const response = await fetch(`${congnitiveURL}/indexes/${indexName}/docs?api-version=2025-05-01-Preview&search=${query}&$top=${size}&$skip=${skip}`,{
           method: 'GET',
           headers: { 'api-key': cognitiveKEY },
         });
