@@ -1,10 +1,9 @@
-// src/functions/searchProviders.js
+// src/functions/searchPatients.js
 const { app } = require('@azure/functions');
 const { success, error, badRequest } = require('../shared/responseUtils');
 
 const congnitiveURL = process.env.COGNITIVE_AI_URL;
 const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY;
-
 
 app.http('searchPatients', {
   methods: ['POST'],
@@ -18,39 +17,59 @@ app.http('searchPatients', {
     }
 
     const requiredFields = ['query'];
-
     const missingFields = requiredFields.filter(field => !body?.[field]);
-    
 
     if (missingFields.length > 0) {
       return badRequest(`Missing required fields: ${missingFields.join(', ')}`);
     }
 
-    const { query, page = 1, size = 10 } = body;
-    if(query === '*') return badRequest(`Avoid this kind of search parameters`);
+    const { query, page = 1, size = 10, location } = body;
+    if (query === '*') return badRequest(`Avoid using wildcard search (*)`);
 
-    //const searchEndpoint = 'https://cognitivesearchcservices.search.windows.net';
-    //const apiKey = '';
     const indexName = 'cservicespatients-index';
-    
     const skip = (page - 1) * size;
 
+    // Construir el filtro si hay location
+    let filter = null;
+    if (location) {
+      // Escapar comillas simples para evitar errores
+      const safeLocation = location.replace(/'/g, "''");
+      filter = `Location_Name eq '${safeLocation}'`;
+    }
+
+    const searchPayload = {
+      search: query,
+      top: size,
+      skip: skip,
+      count: true // Para devolver el total
+    };
+
+    if (filter) {
+      searchPayload.filter = filter;
+    }
+
     try {
-      const response = await fetch(`${congnitiveURL}/indexes/${indexName}/docs?api-version=2025-05-01-Preview&search=${query}&$top=${size}&$skip=${skip}`,{
-          method: 'GET',
-          headers: { 'api-key': cognitiveKEY },
-        });
-        
-        if (!response.ok) {
-            throw new Error(`Search failed: ${response.status} ${response.statusText}`);
+      const response = await fetch(
+        `${congnitiveURL}/indexes/${indexName}/docs/search?api-version=2025-05-01-Preview`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': cognitiveKEY
+          },
+          body: JSON.stringify(searchPayload)
         }
+      );
 
-        const data = await response.json();
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.status} ${response.statusText}`);
+      }
 
-        return success('Search done', data, 201);
+      const data = await response.json();
+      return success('Search completed', data, 200);
     } catch (err) {
       context.log(err.message);
-      return error('DB Insert error', 500, err.message);
+      return error('Search error', 500, err.message);
     }
   }
 });
