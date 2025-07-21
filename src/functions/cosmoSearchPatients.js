@@ -31,7 +31,7 @@ app.http('searchPatients', {
 
     //const searchEndpoint = 'https://cognitivesearchcservices.search.windows.net';
     //const apiKey = '';
-    const indexName = 'cservicespatientsmdvita-index';
+    const indexName = 'cservicespatients-index';
     
     const skip = (page - 1) * size;
 
