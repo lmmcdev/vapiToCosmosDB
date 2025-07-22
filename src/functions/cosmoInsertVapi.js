@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { getContainer } = require('../shared/cosmoClient');
 const { getPhoneRulesContainer } = require('../shared/cosmoPhoneRulesClient');
+const { getPatientsContainer } = require('../shared/cosmoPatientsClient'); // 👈 asegúrate de tener este cliente
 const { success, badRequest } = require('../shared/responseUtils');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -21,19 +22,16 @@ const deployment = "gpt-35-turbo";
 const batchQueue = [];
 const BATCH_SIZE = 10;
 const BATCH_INTERVAL_MS = 5000;
+
 let container = null;
 let linkRulesContainer = null;
+let patientsContainer = null;
 
 (async () => {
   container = getContainer();
   linkRulesContainer = getPhoneRulesContainer();
+  patientsContainer = getPatientsContainer(); // 👈 inicializamos
 })();
-
-function normalizePhone(phone) {
-  if (!phone) return null;
-  // Ejemplo simple: quitar todo excepto números
-  return phone.replace(/\D/g, '');
-}
 
 async function insertWithRetry(container, item, maxRetries = 5) {
   let attempts = 0;
@@ -164,9 +162,9 @@ app.http('cosmoInsertVapi', {
     const creation_date = dayjs(createdAt).tz(MIAMI_TZ).format('MM/DD/YYYY, HH:mm');
     const ticketId = crypto.randomUUID();
     const phone = body.message.call?.customer?.number;
-    //const phone = normalizePhone(phoneRaw);
 
     let patient_id = null;
+    let linked_patient_snapshot = {};
 
     if (phone && linkRulesContainer) {
       const query = {
@@ -180,7 +178,23 @@ app.http('cosmoInsertVapi', {
         const rule = rules[0];
         patient_id = rule.patient_id;
 
-        // NO actualizar reglas, solo lectura y asignación
+        // 👇 Obtener snapshot del paciente
+        if (patient_id && patientsContainer) {
+          try {
+            const { resource: patient } = await patientsContainer.item(patient_id, patient_id).read();
+            if (patient) {
+              linked_patient_snapshot = {
+                id: patient.id,
+                Name: patient.Name || "",
+                DOB: patient.DOB || "",
+                Address: patient.Address || "",
+                Location: patient.Location || ""
+              };
+            }
+          } catch (e) {
+            context.log(`Could not fetch patient: ${e.message}`);
+          }
+        }
       }
     }
 
@@ -196,7 +210,7 @@ app.http('cosmoInsertVapi', {
       caller_name: body.message.analysis.structuredData?.nombreapellidos_familiar,
       callback_number: body.message.analysis.structuredData?.numero_alternativo,
       phone,
-      patient_id, // Aquí se asigna el patient_id linkeado si se encontró
+      linked_patient_snapshot,
       url_audio: body.message.stereoRecordingUrl,
       caller_id: body.message.phoneNumber?.name,
       call_cost: body.message.cost,
@@ -216,6 +230,6 @@ app.http('cosmoInsertVapi', {
     };
 
     batchQueue.push(itemToInsert);
-    return success('Ticket received and queued for batch insert', { ticketId, aiClassification, patient_id });
+    return success('Ticket received and queued for batch insert', { ticketId, aiClassification, patient_id, linked_patient_snapshot });
   }
 });
