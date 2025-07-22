@@ -1,6 +1,8 @@
 // api/updateTicketsByPhone/index.js
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
+const { success, badRequest, notFound, error } = require('../shared/responseUtils');
+
 
 app.http('updateTicketsByPhone', {
   methods: ['POST'],
@@ -18,15 +20,15 @@ app.http('updateTicketsByPhone', {
       const container = getContainer();
 
       if (!['relateCurrent', 'relatePast', 'relateFuture', 'unlink'].includes(action)) {
-        return { status: 400, body: `Invalid action: ${action}` };
+        return badRequest('Invalid Action.');
       }
 
       if (!patient_id && action !== 'unlink') {
-        return { status: 400, body: 'Missing required field: patient_id' };
+        return badRequest('Missing required field: patient_id');
       }
 
       if (['relateCurrent', 'unlink'].includes(action) && !ticket_id) {
-        return { status: 400, body: 'Missing required field: ticket_id' };
+        return badRequest('Missing required field: ticket_id');
       }
 
       let updatedCount = 0;
@@ -66,19 +68,13 @@ app.http('updateTicketsByPhone', {
           updatedIds.push(ticket_id);
         }
 
-        return {
-          status: 200,
-          jsonBody: {
-            message: `Linked ticket ${ticket_id} to patient_id ${patient_id}`,
-            updated_ticket_ids: updatedIds
-          }
-        };
+        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}, updated ${updatedIds}`, { updatedIds }, 201);
       }
 
       // 👉 RELATE ALL PAST TICKETS BY PHONE
       if (action === 'relatePast') {
         if (!phone) {
-          return { status: 400, body: 'Missing required field: phone' };
+          return badRequest('Missing required field: phone');
         }
 
         let continuationToken = null;
@@ -127,13 +123,7 @@ app.http('updateTicketsByPhone', {
           continuationToken = token;
         } while (continuationToken);
 
-        return {
-          status: 200,
-          jsonBody: {
-            message: `Updated ${updatedCount} ticket(s) with phone ${phone}`,
-            updated_ticket_ids: updatedIds
-          }
-        };
+        return success(`Updated ${updatedCount} ticket(s) with phone ${phone}`, { updatedCount }, 201);
       }
 
       // 👉 RELATE FUTURE TICKETS: GUARDAR UNA "RULE"
@@ -151,12 +141,7 @@ app.http('updateTicketsByPhone', {
           created_by: agent_email
         });
 
-        return {
-          status: 200,
-          jsonBody: {
-            message: `Future tickets with phone ${phone} will be auto-linked to patient_id ${patient_id}`
-          }
-        };
+        return success('Ticket updated', { agent_email }, 201);
       }
 
       // 👉 UNLINK TICKET
@@ -191,18 +176,11 @@ app.http('updateTicketsByPhone', {
           updatedIds.push(ticket_id);
         }
 
-        return {
-          status: 200,
-          jsonBody: {
-            message: `Unlinked ticket ${ticket_id}`,
-            updated_ticket_ids: updatedIds
-          }
-        };
+        return success(`Unlinked ticket ${ticket_id}`, { ticket_id }, 201);
       }
 
-    } catch (error) {
-      context.log.error('Error:', error);
-      return { status: 500, body: `Error: ${error.message}` };
+    } catch (err) {
+      return error('Error', 500, err.message);
     }
   }
 });
