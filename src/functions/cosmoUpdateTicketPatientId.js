@@ -6,7 +6,7 @@ const { success, badRequest, notFound, error } = require('../shared/responseUtil
 
 app.http('updateTicketsByPhone', {
   methods: ['POST'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   handler: async (request, context) => {
     try {
       const {
