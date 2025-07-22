@@ -1,7 +1,6 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
-const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 
 app.http('cosmoGet', {
@@ -14,7 +13,6 @@ app.http('cosmoGet', {
 
       const agentContainer = getAgentContainer();
       const ticketContainer = getContainer();
-      const patientsContainer = getPatientsContainer();
 
       // ✅ Buscar agente
       const { resources: agentResult } = await agentContainer.items
@@ -71,55 +69,13 @@ app.http('cosmoGet', {
         .query({ query, parameters })
         .fetchAll();
 
-      // 🔍 Buscar todos los patient_id distintos
-      const patientIds = tickets
-        .map(t => t.patient_id)
-        .filter(pid => pid && pid.trim() !== "");
+      // ✅ Devolver linked_patient_snapshot siempre presente
+      const finalTickets = tickets.map(ticket => ({
+        ...ticket,
+        linked_patient_snapshot: ticket.linked_patient_snapshot || {}
+      }));
 
-      const uniquePatientIds = [...new Set(patientIds)];
-      let patientsMap = new Map();
-
-      if (uniquePatientIds.length > 0) {
-        const inClause = uniquePatientIds.map((_, idx) => `@p${idx}`).join(',');
-        const patientQuery = `SELECT * FROM c WHERE c.id IN (${inClause})`;
-        const patientParams = uniquePatientIds.map((id, idx) => ({ name: `@p${idx}`, value: id }));
-
-        const { resources: patientRecords } = await patientsContainer.items
-          .query({ query: patientQuery, parameters: patientParams })
-          .fetchAll();
-
-        patientsMap = new Map(patientRecords.map(p => [p.id, p]));
-      }
-
-      // ✅ Construir lista final
-      const enrichedTickets = tickets.map(ticket => {
-        let snapshot = {};
-        let patient_id = ticket.patient_id || "";
-
-        if (patient_id && ticket.linked_patient_snapshot && Object.keys(ticket.linked_patient_snapshot).length > 0) {
-          snapshot = ticket.linked_patient_snapshot;
-        } else if (patient_id && patientsMap.has(patient_id)) {
-          const p = patientsMap.get(patient_id);
-          snapshot = {
-            id: p.id,
-            Name: p.Name || "",
-            DOB: p.DOB || "",
-            Address: p.Address || "",
-            Location: p.Location || ""
-          };
-        } else {
-          snapshot = {};
-          patient_id = "";
-        }
-
-        return {
-          ...ticket,
-          patient_id,
-          linked_patient_snapshot: snapshot
-        };
-      });
-
-      return success(enrichedTickets);
+      return success(finalTickets);
     } catch (err) {
       context.log('❌ Error al consultar tickets:', err);
       return error('Error al consultar tickets', err);
