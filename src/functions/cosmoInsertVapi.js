@@ -2,6 +2,7 @@ const { app } = require('@azure/functions');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { getContainer } = require('../shared/cosmoClient');
+const { getPhoneRulesContainer } = require('../shared/cosmoPhoneRulesClient');
 const { success, badRequest } = require('../shared/responseUtils');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -17,13 +18,23 @@ const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const openaiApiKey = process.env.AZURE_OPENAI_KEY;
 const deployment = "gpt-35-turbo";
 
-// Batch queue
 const batchQueue = [];
 const BATCH_SIZE = 10;
 const BATCH_INTERVAL_MS = 5000;
 let container = null;
+let linkRulesContainer = null;
 
-// Retry-safe insert
+(async () => {
+  container = getContainer();
+  linkRulesContainer = getPhoneRulesContainer();
+})();
+
+function normalizePhone(phone) {
+  if (!phone) return null;
+  // Ejemplo simple: quitar todo excepto números
+  return phone.replace(/\D/g, '');
+}
+
 async function insertWithRetry(container, item, maxRetries = 5) {
   let attempts = 0;
   while (attempts < maxRetries) {
@@ -43,12 +54,6 @@ async function insertWithRetry(container, item, maxRetries = 5) {
   throw new Error('Max retries reached for insertion.');
 }
 
-// Init container once
-(async () => {
-  container = getContainer();
-})();
-
-// Process batch every 5 seconds
 setInterval(async () => {
   if (!container || batchQueue.length === 0) return;
 
@@ -62,12 +67,12 @@ setInterval(async () => {
 
     await container.items.bulk(operations);
   } catch (bulkError) {
-    console.warn('⚠️ Bulk insert failed. Retrying individually...');
+    console.warn('Bulk insert failed. Retrying individually...');
     for (const doc of batch) {
       try {
         await insertWithRetry(container, doc);
       } catch (e) {
-        console.error('❌ Failed to insert after retries:', e.message);
+        console.error('Failed to insert after retries:', e.message);
       }
     }
   }
@@ -81,12 +86,11 @@ setInterval(async () => {
         body: JSON.stringify(doc),
       });
     } catch (e) {
-      console.warn('⚠️ SignalR failed:', e.message);
+      console.warn('SignalR notify failed:', e.message);
     }
   }
 }, BATCH_INTERVAL_MS);
 
-// HTTP handler
 app.http('cosmoInsertVapi', {
   methods: ['POST'],
   authLevel: 'anonymous',
@@ -102,11 +106,7 @@ app.http('cosmoInsertVapi', {
       return badRequest('Missing summary');
     }
 
-    /////////////////////////////////////////////////////////////////////////////
-    /// Direct OpenAI Ticket Classification
-    /////////////////////////////////////////////////////////////////////////////
     const summary = body.message.analysis.summary;
-    //const summary = body.message.transcript;
 
     let aiClassification = {
       priority: "normal",
@@ -127,7 +127,7 @@ app.http('cosmoInsertVapi', {
             messages: [
               {
                 role: "system",
-                content: `Responde SOLO en JSON con priority (low = consulta general, medium = importante pero no urgente, high = SOLO emergencias), risk (none, legal, disenrollment), y category (solo se permiten: transport, appointment, new patient, disenrollment, customer service, new address, hospitalization, others).`
+                content: `Responde SOLO en JSON con priority (low, medium, high), risk (none, legal, disenrollment), y category (transport, appointment, new patient, disenrollment, customer service, new address, hospitalization, others).`
               },
               {
                 role: "user",
@@ -151,9 +151,6 @@ app.http('cosmoInsertVapi', {
       context.log(`OpenAI classify error: ${err.message}`);
     }
 
-    /////////////////////////////////////////////////////////////////////////////
-    /// Build final ticket
-    /////////////////////////////////////////////////////////////////////////////
     const rawCreatedAt = body.message.call?.createdAt;
     let createdAt;
     try {
@@ -167,9 +164,27 @@ app.http('cosmoInsertVapi', {
     const creation_date = dayjs(createdAt).tz(MIAMI_TZ).format('MM/DD/YYYY, HH:mm');
     const ticketId = crypto.randomUUID();
     const phone = body.message.call?.customer?.number;
+    //const phone = normalizePhone(phoneRaw);
+
+    let patient_id = null;
+
+    if (phone && linkRulesContainer) {
+      const query = {
+        query: "SELECT * FROM c WHERE c.phone = @phone AND c.link_future = true",
+        parameters: [{ name: "@phone", value: phone }]
+      };
+
+      const { resources: rules } = await linkRulesContainer.items.query(query).fetchAll();
+
+      if (rules.length > 0) {
+        const rule = rules[0];
+        patient_id = rule.patient_id;
+
+        // NO actualizar reglas, solo lectura y asignación
+      }
+    }
 
     const itemToInsert = {
-      ...body,
       tickets: ticketId,
       id: ticketId,
       summary,
@@ -181,6 +196,7 @@ app.http('cosmoInsertVapi', {
       caller_name: body.message.analysis.structuredData?.nombreapellidos_familiar,
       callback_number: body.message.analysis.structuredData?.numero_alternativo,
       phone,
+      patient_id, // Aquí se asigna el patient_id linkeado si se encontró
       url_audio: body.message.stereoRecordingUrl,
       caller_id: body.message.phoneNumber?.name,
       call_cost: body.message.cost,
@@ -200,6 +216,6 @@ app.http('cosmoInsertVapi', {
     };
 
     batchQueue.push(itemToInsert);
-    return success('Ticket received and queued for batch insert', { ticketId, aiClassification });
+    return success('Ticket received and queued for batch insert', { ticketId, aiClassification, patient_id });
   }
 });
