@@ -34,7 +34,7 @@ app.http('searchTickets', {
     if (location) {
       // Escapar comillas simples para evitar errores
       const safeLocation = location.replace(/'/g, "''");
-      filter = `Location_Name eq '${safeLocation}'`;
+      filter = `caller_id eq '${safeLocation}'`;
     }
 
     const searchPayload = {
