@@ -3,6 +3,56 @@ const { success, error, badRequest } = require('../shared/responseUtils');
 
 const congnitiveURL = process.env.COGNITIVE_AI_URL;
 const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY;
+const indexName = 'index-tickets';
+
+function cleanQueryInput(raw) {
+  if (!raw) return '';
+  return raw.replace(/^[CH]:\s*/i, '').replace(/[^\dA-Za-z\s@.-]/g, '').trim();
+}
+
+function buildFilter(filters = {}) {
+  const parts = [];
+
+  if (filters.status) {
+    parts.push(`status eq '${filters.status}'`);
+  }
+
+  if (filters.assigned_department) {
+    parts.push(`assigned_department eq '${filters.assigned_department}'`);
+  }
+
+  if (filters.createdAt) {
+    const { from, to } = filters.createdAt;
+    if (from) parts.push(`createdAt ge ${from}`);
+    if (to) parts.push(`createdAt le ${to}`);
+  }
+
+  return parts.length ? parts.join(' and ') : null;
+}
+
+function validateFilterString(filter) {
+  // Permitir campos específicos y operadores válidos
+  const allowedFields = ['status', 'assigned_department', 'createdAt', 'agent_assigned'];
+  const allowedOps = ['eq', 'ge', 'le'];
+
+  const conditions = filter.split('and').map(s => s.trim());
+
+  for (const cond of conditions) {
+    const parts = cond.split(/\s+/);
+    if (parts.length < 3) {
+      return `Invalid filter condition: ${cond}`;
+    }
+
+    const [field, op] = parts;
+    if (!allowedFields.includes(field)) {
+      return `Invalid field in filter: ${field}`;
+    }
+    if (!allowedOps.includes(op)) {
+      return `Invalid operator in filter: ${op}`;
+    }
+  }
+  return null; // OK
+}
 
 app.http('searchTickets', {
   methods: ['POST'],
@@ -15,33 +65,41 @@ app.http('searchTickets', {
       return badRequest('Invalid JSON', err.message);
     }
 
-    const { query, page = 1, size = 50, location } = body;
-    if (!query) return badRequest(`Missing required field: query`);
-    if (query === '*') return badRequest(`Avoid using wildcard search (*)`);
+    const { query, page = 1, size = 50, filters = {}, filter } = body;
 
-    // Sanitizar número si tiene formato como "C: xxx", "H: xxx", etc
-    const cleanedQuery = query.replace(/^[CH]:\s*/i, '').replace(/[^\dA-Za-z\s@.-]/g, '');
-
-    const indexName = 'index-tickets';
-    const skip = (page - 1) * size;
-
-    // Filtro si hay location
-    let filter = null;
-    if (location) {
-      const safeLocation = location.replace(/'/g, "''");
-      filter = `caller_id eq '${safeLocation}'`;
+    if (!query && !filter && Object.keys(filters).length === 0) {
+      return badRequest('Provide at least a query or filters');
     }
 
+    if (query === '*') {
+      return badRequest('Avoid using wildcard search (*)');
+    }
+
+    const cleanedQuery = cleanQueryInput(query);
+    const skip = (page - 1) * size;
+
     const searchPayload = {
-      search: cleanedQuery,
+      search: cleanedQuery || "*",
       top: size,
-      skip: skip,
+      skip,
       count: true,
-      searchFields: 'caller_id,phone,patient_name'
+      searchFields: cleanedQuery
+        ? 'caller_id,phone,patient_name,agent_assigned,assigned_department'
+        : undefined,
     };
 
+    // ✅ Validar y asignar filtro
     if (filter) {
+      const validationError = validateFilterString(filter);
+      if (validationError) {
+        return badRequest(`Invalid filter: ${validationError}`);
+      }
       searchPayload.filter = filter;
+    } else {
+      const filterString = buildFilter(filters);
+      if (filterString) {
+        searchPayload.filter = filterString;
+      }
     }
 
     try {
@@ -58,7 +116,8 @@ app.http('searchTickets', {
       );
 
       if (!response.ok) {
-        throw new Error(`Search failed: ${response.status} ${response.statusText}`);
+        const errorMsg = await response.text();
+        throw new Error(`Search failed: ${response.status} ${response.statusText} - ${errorMsg}`);
       }
 
       const data = await response.json();
