@@ -1,4 +1,3 @@
-// src/functions/searchPatients.js
 const { app } = require('@azure/functions');
 const { success, error, badRequest } = require('../shared/responseUtils');
 
@@ -16,32 +15,29 @@ app.http('searchTickets', {
       return badRequest('Invalid JSON', err.message);
     }
 
-    const requiredFields = ['query'];
-    const missingFields = requiredFields.filter(field => !body?.[field]);
-
-    if (missingFields.length > 0) {
-      return badRequest(`Missing required fields: ${missingFields.join(', ')}`);
-    }
-
     const { query, page = 1, size = 50, location } = body;
+    if (!query) return badRequest(`Missing required field: query`);
     if (query === '*') return badRequest(`Avoid using wildcard search (*)`);
+
+    // Sanitizar número si tiene formato como "C: xxx", "H: xxx", etc
+    const cleanedQuery = query.replace(/^[CH]:\s*/i, '').replace(/[^\dA-Za-z\s@.-]/g, '');
 
     const indexName = 'index-tickets';
     const skip = (page - 1) * size;
 
-    // Construir el filtro si hay location
+    // Filtro si hay location
     let filter = null;
     if (location) {
-      // Escapar comillas simples para evitar errores
       const safeLocation = location.replace(/'/g, "''");
       filter = `caller_id eq '${safeLocation}'`;
     }
 
     const searchPayload = {
-      search: query,
+      search: cleanedQuery,
       top: size,
       skip: skip,
-      count: true // Para devolver el total
+      count: true,
+      searchFields: 'caller_id,phone,patient_name'
     };
 
     if (filter) {
