@@ -4,6 +4,7 @@ const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 
 const patientsContainer = getPatientsContainer();
+const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('updateTicketsByPhone', {
   methods: ['POST'],
@@ -34,7 +35,7 @@ app.http('updateTicketsByPhone', {
 
       let linked_patient_snapshot = {};
 
-      // 👇 Mismo snapshot que `cosmoInsertVapi`
+      // ✅ Snapshot del paciente
       if (patient_id && patientsContainer) {
         try {
           const { resource: patient } = await patientsContainer.item(patient_id, patient_id).read();
@@ -54,8 +55,9 @@ app.http('updateTicketsByPhone', {
 
       let updatedCount = 0;
       let updatedIds = [];
+      let responseData = { action, updatedIds: [], patient_id, phone };
 
-      // 👉 RELATE CURRENT TICKET
+      // 👉 RELATE CURRENT
       if (action === 'relateCurrent') {
         const item = container.item(ticket_id, ticket_id);
         const { resource: ticket } = await item.read();
@@ -93,12 +95,24 @@ app.http('updateTicketsByPhone', {
           await item.patch(patchOps);
           updatedCount = 1;
           updatedIds.push(ticket_id);
+          responseData.updatedIds = updatedIds;
+        }
+
+        // ✅ Notificar a SignalR
+        try {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(responseData)
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR failed:', e.message);
         }
 
         return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}`, { updatedIds }, 201);
       }
 
-      // 👉 RELATE ALL PAST TICKETS BY PHONE
+      // 👉 RELATE PAST
       if (action === 'relatePast') {
         if (!phone) {
           return badRequest('Missing required field: phone');
@@ -156,10 +170,23 @@ app.http('updateTicketsByPhone', {
           continuationToken = token;
         } while (continuationToken);
 
+        responseData.updatedIds = updatedIds;
+
+        // ✅ Notificar a SignalR
+        try {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(responseData)
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR failed:', e.message);
+        }
+
         return success(`Updated ${updatedCount} ticket(s) with phone ${phone}`, { updatedCount }, 201);
       }
 
-      // 👉 RELATE FUTURE (RULE)
+      // 👉 RELATE FUTURE
       if (action === 'relateFuture') {
         const ruleContainer = container.database.container('phone_link_rules');
 
@@ -172,6 +199,19 @@ app.http('updateTicketsByPhone', {
           created_at: new Date().toISOString(),
           created_by: agent_email
         });
+
+        responseData.updatedIds = []; // No tickets actualizados, solo regla creada
+
+        // ✅ Notificar a SignalR
+        try {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(responseData)
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR failed:', e.message);
+        }
 
         return success('Future link rule saved', { phone, patient_id }, 201);
       }
@@ -210,6 +250,18 @@ app.http('updateTicketsByPhone', {
           await item.patch(patchOps);
           updatedCount = 1;
           updatedIds.push(ticket_id);
+          responseData.updatedIds = updatedIds;
+        }
+
+        // ✅ Notificar a SignalR
+        try {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(responseData)
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR failed:', e.message);
         }
 
         return success(`Unlinked ticket ${ticket_id}`, { ticket_id }, 201);
