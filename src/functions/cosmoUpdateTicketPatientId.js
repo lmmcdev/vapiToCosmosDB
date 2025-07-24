@@ -7,6 +7,7 @@ const patientsContainer = getPatientsContainer();
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 async function notifySignalR(ticket, context) {
+  context.log('🔔 Notifying SignalR:', ticket);
   try {
     await fetch(signalRUrl, {
       method: 'POST',
@@ -241,7 +242,7 @@ app.http('updateTicketsByPhone', {
         console.log(updatedTicket)
         await notifySignalR(updatedTicket, context);
 
-        return success(`Unlinked ticket ${ticket_id}`, { updatedTicket }, 201);
+        return success(`Unlinked ticket ${updatedTicket}`, { updatedTicket }, 201);
       }
 
 
