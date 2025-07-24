@@ -231,13 +231,16 @@ app.http('updateTicketsByPhone', {
           await item.patch(patchOps);
         }
 
-        const { resource: updatedTicket } = await item.read();
-        await notifySignalR(updatedTicket, context);
+        // ✅ Forzar lectura fresca desde Cosmos (sin usar el item en caché)
+        const { resource: updatedTicket } = await container
+          .item(ticket_id, ticket_id)
+          .read({ consistencyLevel: "Strong" });
 
-        updatedCount = 1;
+        await notifySignalR(updatedTicket, context);
 
         return success(`Unlinked ticket ${ticket_id}`, { updatedTicket }, 201);
       }
+
 
     } catch (err) {
       return error('Error', 500, err.message);
