@@ -236,6 +236,9 @@ app.http('updateTicketsByPhone', {
           .item(ticket_id, ticket_id)
           .read({ consistencyLevel: "Strong" });
 
+        delete updatedTicket.patient_id;
+        delete updatedTicket.linked_patient_snapshot;
+        
         await notifySignalR(updatedTicket, context);
 
         return success(`Unlinked ticket ${ticket_id}`, { updatedTicket }, 201);
