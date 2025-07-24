@@ -6,6 +6,18 @@ const { success, badRequest, error } = require('../shared/responseUtils');
 const patientsContainer = getPatientsContainer();
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
+async function notifySignalR(ticket, context) {
+  try {
+    await fetch(signalRUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ticket)
+    });
+  } catch (e) {
+    context.log('⚠️ SignalR failed:', e.message);
+  }
+}
+
 app.http('updateTicketsByPhone', {
   methods: ['POST'],
   authLevel: 'anonymous',
@@ -35,7 +47,7 @@ app.http('updateTicketsByPhone', {
 
       let linked_patient_snapshot = {};
 
-      // ✅ Snapshot del paciente
+      // ✅ Obtener snapshot paciente
       if (patient_id && patientsContainer) {
         try {
           const { resource: patient } = await patientsContainer.item(patient_id, patient_id).read();
@@ -54,8 +66,6 @@ app.http('updateTicketsByPhone', {
       }
 
       let updatedCount = 0;
-      let updatedIds = [];
-      let responseData = { action, updatedIds: [], patient_id, phone };
 
       // 👉 RELATE CURRENT
       if (action === 'relateCurrent') {
@@ -93,23 +103,15 @@ app.http('updateTicketsByPhone', {
 
         if (patchOps.length > 0) {
           await item.patch(patchOps);
-          updatedCount = 1;
-          updatedIds.push(ticket_id);
-          responseData.updatedIds = updatedIds;
         }
 
-        // ✅ Notificar a SignalR
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(responseData)
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
+        // ✅ Leer ticket actualizado y enviar a SignalR
+        const { resource: updatedTicket } = await item.read();
+        await notifySignalR(updatedTicket, context);
 
-        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}`, { updatedIds }, 201);
+        updatedCount = 1;
+
+        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}`, { updatedTicket }, 201);
       }
 
       // 👉 RELATE PAST
@@ -131,6 +133,7 @@ app.http('updateTicketsByPhone', {
             .fetchNext();
 
           for (const ticket of resources) {
+            const item = container.item(ticket.id, ticket.id);
             const patchOps = [];
 
             if (!ticket.patient_id) {
@@ -161,27 +164,15 @@ app.http('updateTicketsByPhone', {
             });
 
             if (patchOps.length > 0) {
-              await container.item(ticket.id, ticket.id).patch(patchOps);
+              await item.patch(patchOps);
+              const { resource: updatedTicket } = await item.read();
+              await notifySignalR(updatedTicket, context);
               updatedCount++;
-              updatedIds.push(ticket.id);
             }
           }
 
           continuationToken = token;
         } while (continuationToken);
-
-        responseData.updatedIds = updatedIds;
-
-        // ✅ Notificar a SignalR
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(responseData)
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
 
         return success(`Updated ${updatedCount} ticket(s) with phone ${phone}`, { updatedCount }, 201);
       }
@@ -200,18 +191,8 @@ app.http('updateTicketsByPhone', {
           created_by: agent_email
         });
 
-        responseData.updatedIds = []; // No tickets actualizados, solo regla creada
-
-        // ✅ Notificar a SignalR
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(responseData)
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
+        // ✅ Enviar una notificación mínima a SignalR (regla)
+        await notifySignalR({ type: 'future_rule', phone, patient_id }, context);
 
         return success('Future link rule saved', { phone, patient_id }, 201);
       }
@@ -248,23 +229,14 @@ app.http('updateTicketsByPhone', {
 
         if (patchOps.length > 0) {
           await item.patch(patchOps);
-          updatedCount = 1;
-          updatedIds.push(ticket_id);
-          responseData.updatedIds = updatedIds;
         }
 
-        // ✅ Notificar a SignalR
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(responseData)
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
+        const { resource: updatedTicket } = await item.read();
+        await notifySignalR(updatedTicket, context);
 
-        return success(`Unlinked ticket ${ticket_id}`, { ticket_id }, 201);
+        updatedCount = 1;
+
+        return success(`Unlinked ticket ${ticket_id}`, { updatedTicket }, 201);
       }
 
     } catch (err) {
