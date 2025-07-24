@@ -238,7 +238,7 @@ app.http('updateTicketsByPhone', {
 
         delete updatedTicket.patient_id;
         delete updatedTicket.linked_patient_snapshot;
-        
+        console.log(updatedTicket)
         await notifySignalR(updatedTicket, context);
 
         return success(`Unlinked ticket ${ticket_id}`, { updatedTicket }, 201);
