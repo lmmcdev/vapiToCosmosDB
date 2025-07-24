@@ -1,8 +1,9 @@
-// api/updateTicketsByPhone/index.js
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { success, badRequest, notFound, error } = require('../shared/responseUtils');
+const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
+const { success, badRequest, error } = require('../shared/responseUtils');
 
+const patientsContainer = getPatientsContainer();
 
 app.http('updateTicketsByPhone', {
   methods: ['POST'],
@@ -31,6 +32,26 @@ app.http('updateTicketsByPhone', {
         return badRequest('Missing required field: ticket_id');
       }
 
+      let linked_patient_snapshot = {};
+
+      // 👇 Mismo snapshot que `cosmoInsertVapi`
+      if (patient_id && patientsContainer) {
+        try {
+          const { resource: patient } = await patientsContainer.item(patient_id, patient_id).read();
+          if (patient) {
+            linked_patient_snapshot = {
+              id: patient.id,
+              Name: patient.Name || "",
+              DOB: patient.DOB || "",
+              Address: patient.Address || "",
+              Location: patient.Location || ""
+            };
+          }
+        } catch (err) {
+          context.log(`Could not build snapshot: ${err.message}`);
+        }
+      }
+
       let updatedCount = 0;
       let updatedIds = [];
 
@@ -45,6 +66,12 @@ app.http('updateTicketsByPhone', {
           patchOps.push({ op: 'add', path: '/patient_id', value: patient_id });
         } else if (ticket.patient_id !== patient_id) {
           patchOps.push({ op: 'replace', path: '/patient_id', value: patient_id });
+        }
+
+        if (!ticket.linked_patient_snapshot) {
+          patchOps.push({ op: 'add', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
+        } else {
+          patchOps.push({ op: 'replace', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
         }
 
         if (!Array.isArray(ticket.notes)) {
@@ -68,7 +95,7 @@ app.http('updateTicketsByPhone', {
           updatedIds.push(ticket_id);
         }
 
-        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}, updated ${updatedIds}`, { updatedIds }, 201);
+        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}`, { updatedIds }, 201);
       }
 
       // 👉 RELATE ALL PAST TICKETS BY PHONE
@@ -96,6 +123,12 @@ app.http('updateTicketsByPhone', {
               patchOps.push({ op: 'add', path: '/patient_id', value: patient_id });
             } else if (ticket.patient_id !== patient_id) {
               patchOps.push({ op: 'replace', path: '/patient_id', value: patient_id });
+            }
+
+            if (!ticket.linked_patient_snapshot) {
+              patchOps.push({ op: 'add', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
+            } else {
+              patchOps.push({ op: 'replace', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
             }
 
             if (!Array.isArray(ticket.notes)) {
@@ -126,10 +159,8 @@ app.http('updateTicketsByPhone', {
         return success(`Updated ${updatedCount} ticket(s) with phone ${phone}`, { updatedCount }, 201);
       }
 
-      // 👉 RELATE FUTURE TICKETS: GUARDAR UNA "RULE"
+      // 👉 RELATE FUTURE (RULE)
       if (action === 'relateFuture') {
-        // 👉 Aquí decides cómo guardar la regla:
-        // Puedes guardar una collection `phone_link_rules` en el mismo Cosmos DB:
         const ruleContainer = container.database.container('phone_link_rules');
 
         const ruleId = `rule_${phone}`;
@@ -137,14 +168,15 @@ app.http('updateTicketsByPhone', {
           id: ruleId,
           phone,
           patient_id,
+          linked_patient_snapshot,
           created_at: new Date().toISOString(),
           created_by: agent_email
         });
 
-        return success('Ticket updated', { agent_email }, 201);
+        return success('Future link rule saved', { phone, patient_id }, 201);
       }
 
-      // 👉 UNLINK TICKET
+      // 👉 UNLINK
       if (action === 'unlink') {
         const item = container.item(ticket_id, ticket_id);
         const { resource: ticket } = await item.read();
@@ -153,6 +185,10 @@ app.http('updateTicketsByPhone', {
 
         if (ticket.patient_id) {
           patchOps.push({ op: 'remove', path: '/patient_id' });
+        }
+
+        if (ticket.linked_patient_snapshot) {
+          patchOps.push({ op: 'remove', path: '/linked_patient_snapshot' });
         }
 
         if (!Array.isArray(ticket.notes)) {
