@@ -5,21 +5,38 @@ app.http('generateSasToken', {
   methods: ['GET'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    const resourceUri = request.query.get('resourceUri');
-    const keyName = request.query.get('keyName');
-    const key = request.query.get('key');
+    const connectionString = request.query.get('connectionString');
 
-    if (!resourceUri || !keyName || !key) {
+    if (!connectionString) {
       return {
         status: 400,
-        jsonBody: {
-          error: 'Missing required query params: resourceUri, keyName, key',
-        },
+        jsonBody: { error: 'Missing required parameter: connectionString' },
       };
     }
 
-    const expiry = Math.floor(Date.now() / 1000) + 3600; // Token válido por 1 hora
-    const encodedUri = encodeURIComponent(resourceUri);
+    // Parsear la connection string
+    const parts = {};
+    connectionString.split(';').forEach(part => {
+      const [key, ...rest] = part.split('=');
+      parts[key.toLowerCase()] = rest.join('=');
+    });
+
+    const endpoint = parts['endpoint']; // sb://.../
+    const keyName = parts['sharedaccesskeyname'];
+    const key = parts['sharedaccesskey'];
+
+    if (!endpoint || !keyName || !key) {
+      return {
+        status: 400,
+        jsonBody: { error: 'Invalid connection string format' },
+      };
+    }
+
+    // Quitar el "sb://" y "/" final para formar el resourceUri
+    const resourceUri = endpoint.replace(/^sb:\/\/|\/$/g, '') + '/cservicesnotificationhub1';
+
+    const expiry = Math.floor(Date.now() / 1000) + 3600; // 1 hora
+    const encodedUri = encodeURIComponent(resourceUri.toLowerCase());
     const stringToSign = `${encodedUri}\n${expiry}`;
 
     const hmac = crypto.createHmac('sha256', Buffer.from(key, 'base64'));
