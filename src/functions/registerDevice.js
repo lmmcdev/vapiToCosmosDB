@@ -25,9 +25,9 @@ app.http('registerDevice', {
         };
       }
 
-      const installation = createBrowserInstallation({
+      const installation = createFcmV1Installation({
         installationId,
-        pushChannel,
+        fcmToken:pushChannel,
         tags,
       });
 
