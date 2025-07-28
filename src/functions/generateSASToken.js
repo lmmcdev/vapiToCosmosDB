@@ -15,7 +15,7 @@ function generateSasToken(resourceUri, keyName, key) {
 
 app.http('generateSasToken', {
   methods: ['POST'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   handler: async (request, context) => {
     const body = await request.json();
 
