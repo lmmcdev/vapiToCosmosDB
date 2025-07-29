@@ -4,11 +4,7 @@ const EVENT_GRID_TOPIC_ENDPOINT = process.env.EVENT_GRID_TOPIC_ENDPOINT;
 const EVENT_GRID_KEY = process.env.EVENT_GRID_KEY;
 
 const COSMOS_DB_CONNECTION_STRING = process.env.COSMOS_CONN_STRING;
-context.log('COSMOS_DB_CONNECTION_STRING:', COSMOS_DB_CONNECTION_STRING);
-if (!EVENT_GRID_TOPIC_ENDPOINT || !EVENT_GRID_KEY) {
-      context.log.error('Event Grid configuration is missing.');
-      return;
-    }
+
 
 app.cosmosDB('processChangeFeed', {
   connection: COSMOS_DB_CONNECTION_STRING,
@@ -18,7 +14,9 @@ app.cosmosDB('processChangeFeed', {
   createLeaseContainerIfNotExists: true,
   handler: async (documents, context) => {
     context.log('Change Feed activado');
-    
+    if (!EVENT_GRID_TOPIC_ENDPOINT || !EVENT_GRID_KEY) {
+      context.log('Event Grid configuration is missing.');
+    }
     if (!documents || documents.length === 0) {
       context.log('No documents to process.');
       return;
