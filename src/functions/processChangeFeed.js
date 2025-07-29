@@ -20,10 +20,10 @@ app.cosmosDB('processChangeFeed', {
     context.log(`Processing ${documents.length} change(s).`);
 
     for (const doc of documents) {
-      const category = doc?.aiClassification?.category;
+      const risk = doc?.aiClassification?.risk;
 
-      if (category !== 'Legal') {
-        context.log(`Document ${doc.id} skipped (category: ${category})`);
+      if (risk !== 'legal') {
+        context.log(`Document ${doc.id} skipped (risk: ${risk})`);
         continue;
       }
 
@@ -35,8 +35,8 @@ app.cosmosDB('processChangeFeed', {
         dataVersion: '1.0',
         data: {
           ticketId: doc.id,
-          title: doc.call_reason || 'Sin motivo',
-          body: doc.description || 'Sin descripción',
+          title: doc.call_reason || 'No motive provided',
+          body: doc.description || 'No description provided',
           department: doc.assigned_department || 'unknown',
           role: 'supervisor',
           priority: doc.aiClassification?.priority || 'normal',
