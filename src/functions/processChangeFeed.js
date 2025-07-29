@@ -1,9 +1,9 @@
 import { app } from '@azure/functions';
 
 app.cosmosDB('processChangeFeed', {
-  connection: 'AzureWebJobsCosmosDBConnection', // ← Nombre de la variable de entorno, no la cadena directamente
+  connection: 'AzureWebJobsCosmosDBConnection',
   databaseName: 'IAData',
-  containerName: 'iadata_id',
+  containerName: 'ticketsv1', // ← Nuevo contenedor
   leaseContainerName: 'leases',
   createLeaseContainerIfNotExists: true,
   feedPollDelay: 1000,
@@ -30,7 +30,7 @@ app.cosmosDB('processChangeFeed', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'aeg-sas-key': process.env.EVENT_GRID_KEY, // ← Asegúrate de tener esta variable en Azure
+            'aeg-sas-key': process.env.EVENT_GRID_KEY,
           },
           body: JSON.stringify([
             {
