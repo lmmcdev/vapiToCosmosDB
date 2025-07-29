@@ -1,74 +1,52 @@
 import { app } from '@azure/functions';
 
-const EVENT_GRID_TOPIC_ENDPOINT = process.env.EVENT_GRID_TOPIC_ENDPOINT;
-const EVENT_GRID_KEY = process.env.EVENT_GRID_KEY;
-
-const COSMOS_DB_CONNECTION_STRING = process.env.COSMOS_CONN_STRING;
-
-
 app.cosmosDB('processChangeFeed', {
-  connection: COSMOS_DB_CONNECTION_STRING,
+  connection: 'AzureWebJobsCosmosDBConnection', // ← Nombre de la variable de entorno, no la cadena directamente
   databaseName: 'IAData',
   containerName: 'iadata_id',
   leaseContainerName: 'leases',
   createLeaseContainerIfNotExists: true,
+  feedPollDelay: 5000,
   handler: async (documents, context) => {
-    context.log('Change Feed activado');
-    if (!EVENT_GRID_TOPIC_ENDPOINT || !EVENT_GRID_KEY) {
-      context.log('Event Grid configuration is missing.');
-    }
-    if (!documents || documents.length === 0) {
-      context.log('No documents to process.');
+    if (!documents?.length) return;
+
+    context.log(`🔄 Change Feed activado: ${documents.length} documento(s)`);
+
+    const legalDocs = documents.filter(
+      (doc) =>
+        doc?.aiClassification?.category?.toLowerCase() === 'legal'
+    );
+
+    if (legalDocs.length === 0) {
+      context.log('✅ Ningún documento con categoría "Legal"');
       return;
     }
 
-    context.log(`Processing ${documents.length} change(s).`);
+    context.log(`🚨 Se detectaron ${legalDocs.length} documento(s) con categoría "Legal"`);
 
-    for (const doc of documents) {
-      const risk = doc?.aiClassification?.risk;
-
-      if (risk !== 'legal') {
-        context.log(`Document ${doc.id} skipped (risk: ${risk})`);
-        continue;
-      }
-
-      const event = {
-        id: `ticket-legal-${doc.id}`,
-        eventType: 'ticket.created',
-        subject: `tickets/${doc.id}`,
-        eventTime: new Date().toISOString(),
-        dataVersion: '1.0',
-        data: {
-          ticketId: doc.id,
-          title: doc.call_reason || 'No motive provided',
-          body: doc.description || 'No description provided',
-          department: doc.assigned_department || 'unknown',
-          role: 'supervisor',
-          priority: doc.aiClassification?.priority || 'normal',
-          agent_assigned: doc.agent_assigned || 'unassigned',
-          status: doc.status || 'open',
-          phone: doc.phone || '',
-        },
-      };
-
+    for (const doc of legalDocs) {
       try {
-        const response = await fetch(EVENT_GRID_TOPIC_ENDPOINT, {
+        const response = await fetch('https://cserviceseventgrid.eastus-1.eventgrid.azure.net/api/events', {
           method: 'POST',
           headers: {
-            'aeg-sas-key': EVENT_GRID_KEY,
             'Content-Type': 'application/json',
+            'aeg-sas-key': process.env.EVENTGRID_KEY, // ← Asegúrate de tener esta variable en Azure
           },
-          body: JSON.stringify([event]),
+          body: JSON.stringify([
+            {
+              id: doc.id,
+              eventType: 'legal.ticket.detected',
+              subject: `/tickets/${doc.id}`,
+              eventTime: new Date().toISOString(),
+              data: doc,
+              dataVersion: '1.0',
+            },
+          ]),
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-
-        context.log(`✅ EventGrid: Evento enviado para ticket LEGAL ${doc.id}`);
-      } catch (error) {
-        context.log.error(`❌ Error al enviar evento para ${doc.id}: ${error.message}`);
+        context.log(`📤 Evento enviado para documento ${doc.id}:`, response.status);
+      } catch (err) {
+        context.log.error(`❌ Error al enviar evento para ${doc.id}:`, err.message);
       }
     }
   },
