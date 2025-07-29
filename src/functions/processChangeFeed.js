@@ -30,7 +30,7 @@ app.cosmosDB('processChangeFeed', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'aeg-sas-key': process.env.EVENTGRID_KEY, // ← Asegúrate de tener esta variable en Azure
+            'aeg-sas-key': process.env.EVENT_GRID_KEY, // ← Asegúrate de tener esta variable en Azure
           },
           body: JSON.stringify([
             {
