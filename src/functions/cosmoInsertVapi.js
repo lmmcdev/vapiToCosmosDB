@@ -199,7 +199,7 @@ app.http('cosmoInsertVapi', {
     }
 
     const itemToInsert = {
-      tickets: 'lmmc',
+      tickets: ticketId,
       id: ticketId,
       summary,
       call_reason: body.message.analysis.structuredData?.razon_llamada,
