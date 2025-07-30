@@ -127,7 +127,9 @@ app.http('cosmoUpdateWorkTime', {
         agent_assigned: updated.agent_assigned,
         tiket_source: updated.tiket_source,
         phone: updated.phone,
-        work_time: updated.work_time
+        work_time: updated.work_time,
+        ticket_patient_snapshot: updated.linked_patient_snapshot,
+        aiClassification: updated.aiClassification
       };
 
       try {
