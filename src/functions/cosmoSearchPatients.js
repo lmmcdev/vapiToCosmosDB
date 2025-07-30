@@ -1,8 +1,7 @@
-// src/functions/searchPatients.js
 const { app } = require('@azure/functions');
 const { success, error, badRequest } = require('../shared/responseUtils');
 
-const congnitiveURL = process.env.COGNITIVE_AI_URL;
+const cognitiveURL = process.env.COGNITIVE_AI_URL;
 const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY;
 
 app.http('searchPatients', {
@@ -23,34 +22,29 @@ app.http('searchPatients', {
       return badRequest(`Missing required fields: ${missingFields.join(', ')}`);
     }
 
-    const { query, page = 1, size = 10, location } = body;
-    if (query === '*') return badRequest(`Avoid using wildcard search (*)`);
+    const { query, filter = '', page = 1, size = 50 } = body;
+
+    if (query === '*') {
+      return badRequest('Avoid using wildcard search (*)');
+    }
 
     const indexName = 'cservicespatients-index';
     const skip = (page - 1) * size;
-
-    // Construir el filtro si hay location
-    let filter = null;
-    if (location) {
-      // Escapar comillas simples para evitar errores
-      const safeLocation = location.replace(/'/g, "''");
-      filter = `Location_Name eq '${safeLocation}'`;
-    }
 
     const searchPayload = {
       search: query,
       top: size,
       skip: skip,
-      count: true // Para devolver el total
+      count: true
     };
 
-    if (filter) {
+    if (filter && typeof filter === 'string' && filter.trim().length > 0) {
       searchPayload.filter = filter;
     }
 
     try {
       const response = await fetch(
-        `${congnitiveURL}/indexes/${indexName}/docs/search?api-version=2025-05-01-Preview`,
+        `${cognitiveURL}/indexes/${indexName}/docs/search?api-version=2025-05-01-Preview`,
         {
           method: 'POST',
           headers: {
