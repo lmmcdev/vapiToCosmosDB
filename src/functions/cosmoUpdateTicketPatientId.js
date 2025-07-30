@@ -108,6 +108,7 @@ app.http('updateTicketsByPhone', {
 
         // ✅ Leer ticket actualizado y enviar a SignalR
         const { resource: updatedTicket } = await item.read();
+        updatedTicket.linked_patient_snapshot = linked_patient_snapshot;
         await notifySignalR(updatedTicket, context);
 
         updatedCount = 1;
@@ -240,7 +241,7 @@ app.http('updateTicketsByPhone', {
 
         delete updatedTicket.patient_id;
         delete updatedTicket.linked_patient_snapshot;
-        console.log(updatedTicket)
+        //console.log(updatedTicket)
         await notifySignalR(updatedTicket, context);
 
         return success(`Unlinked ticket ${updatedTicket}`, { updatedTicket }, 201);
