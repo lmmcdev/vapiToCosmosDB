@@ -123,7 +123,10 @@ app.http('cosmoUpdateStatus', {
         agent_assigned: updated.agent_assigned,
         tiket_source: updated.tiket_source,
         phone: updated.phone,
-        work_time: updated.work_time
+        work_time: updated.work_time,
+        aiClassification: updated.aiClassification,
+        linked_patient_snapshot: updated.linked_patient_snapshot
+
       };
 
       // SignalR notificaciones
