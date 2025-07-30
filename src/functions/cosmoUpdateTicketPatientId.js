@@ -187,6 +187,7 @@ app.http('updateTicketsByPhone', {
           id: ruleId,
           phone,
           patient_id,
+          link_future: true,
           linked_patient_snapshot,
           created_at: new Date().toISOString(),
           created_by: agent_email
