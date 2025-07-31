@@ -3,7 +3,8 @@ const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+//const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+const signalRUrl = process.env.SIGNALR_TICKET_UPDATED_CHANNEL;
 const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
 const signalrClosedTicket = process.env.SIGNAL_BROADCAST_URL4;
 
