@@ -132,7 +132,7 @@ app.http('cosmoUpdateStatus', {
 
       // SignalR notificaciones
       try {
-        await fetch(signalRUrl, {
+        await fetch(`${signalRUrl}?userId=${agent_email}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(responseData)
