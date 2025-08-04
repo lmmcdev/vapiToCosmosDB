@@ -84,7 +84,7 @@ app.http('searchTickets', {
       skip,
       count: true,
       searchFields: cleanedQuery
-        ? 'caller_id,phone,patient_name,agent_assigned,assigned_department'
+        ? 'caller_id,phone,patient_name,agent_assigned,assigned_department, patient_id'
         : undefined,
     };
 
