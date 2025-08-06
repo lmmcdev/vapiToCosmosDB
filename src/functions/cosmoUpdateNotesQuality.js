@@ -151,9 +151,7 @@ app.http('cosmoUpdateNotesQuality', {
       }
 
 
-      return success('Notes updated successfully.', {
-        applied_operations: patchOps.length
-      });
+      return success('Notes updated successfully.', {responseData});
 
     } catch (err) {
       context.log('❌ Error updating notes:', err);
