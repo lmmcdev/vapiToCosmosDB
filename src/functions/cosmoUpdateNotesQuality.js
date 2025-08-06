@@ -76,7 +76,7 @@ app.http('cosmoUpdateNotesQuality', {
             value: {
               ...note,
               datetime: note.datetime || new Date().toISOString(),
-              event_type: note.event_type || 'quality_note'
+              event_type: 'quality_note'
             }
           });
         }
