@@ -131,9 +131,7 @@ app.http('cosmoUpdateStatusQuality', {
         context.log('⚠️ SignalR failed stats:', e.message);
       }
 
-      return success('Status updated successfully.', {
-        applied_operations: patchOps.length
-      });
+      return success('Status updated successfully.', { responseData });
 
     } catch (err) {
       context.log('❌ Error updating status:', err);
