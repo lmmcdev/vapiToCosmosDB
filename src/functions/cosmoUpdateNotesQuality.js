@@ -4,38 +4,52 @@ const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
-const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
 
-app.http('cosmoUpdateStatusQuality', {
+app.http('cosmoUpdateNotesQuality', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (req, context) => {
-    let ticketId, newStatus, agent_email;
+    let ticketId, notes, agent_email, event;
 
     try {
-      ({ ticketId, newStatus, agent_email } = await req.json());
+      ({ ticketId, notes, agent_email, event } = await req.json());
     } catch (err) {
       return badRequest('Invalid JSON.');
     }
 
-    if (!ticketId || !newStatus || !agent_email) {
-      return badRequest('Missing parameters: ticketId, status or agent_email.');
+    if (!ticketId || !agent_email) {
+      return badRequest('Missing parameters: ticketId or agent_email.');
     }
 
-    const container = getContainer();
+    if (!Array.isArray(notes) && !event) {
+      return badRequest('Missing notes array or event.');
+    }
+
+    if (Array.isArray(notes)) {
+      for (const [i, note] of notes.entries()) {
+        if (
+          typeof note !== 'object' ||
+          !note.agent_email ||
+          typeof note.agent_email !== 'string'
+        ) {
+          return badRequest(`Note at index ${i} is missing a valid 'agent_email'.`);
+        }
+      }
+    }
+
+    const ticketContainer = getContainer();
     const agentContainer = getAgentContainer();
-    const item = container.item(ticketId, ticketId);
+    const ticketItem = ticketContainer.item(ticketId, ticketId);
 
     try {
-      const { resource: ticket } = await item.read();
+      const { resource: ticket } = await ticketItem.read();
       if (!ticket) return notFound('Ticket not found.');
 
-      // Buscar agente
+      // Fetch agent info
       const query = {
         query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
         parameters: [{ name: '@agent_email', value: agent_email }]
       };
-
       const { resources: agents } = await agentContainer.items.query(query).fetchAll();
       if (!agents.length) return badRequest('Agent not found.');
 
@@ -43,44 +57,62 @@ app.http('cosmoUpdateStatusQuality', {
       const role = agent.agent_rol || 'Agent';
 
       const isQuality = role === 'Quality';
+
       if (!isQuality) {
-        return badRequest('You do not have permission to change this ticket\'s status.');
+        return badRequest('You do not have permission to update notes on this ticket.');
       }
-
-      if (ticket.status === newStatus) {
-        return badRequest('New status is the same as the current one. No changes applied.');
-      }
-
-      const quality_control = newStatus === 'QARevisionStart';
 
       const patchOps = [];
 
-      // Asegurar array de notas
       if (!Array.isArray(ticket.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
-      // quality_control: si no existe => add, si existe => replace
-      if (typeof ticket.quality_control === 'undefined') {
-        patchOps.push({ op: 'add', path: '/quality_control', value: quality_control });
-      } else {
-        patchOps.push({ op: 'replace', path: '/quality_control', value: quality_control });
+      if (Array.isArray(notes) && notes.length > 0) {
+        for (const note of notes) {
+          patchOps.push({
+            op: 'add',
+            path: '/notes/-',
+            value: {
+              ...note,
+              datetime: note.datetime || new Date().toISOString(),
+              event_type: note.event_type || 'quality_note'
+            }
+          });
+        }
+
+        patchOps.push({
+          op: 'add',
+          path: '/notes/-',
+          value: {
+            datetime: new Date().toISOString(),
+            event_type: 'system_log',
+            agent_email,
+            event: `Added ${notes.length} note(s) to the ticket.`
+          }
+        });
       }
 
-      // Agregar nota de sistema
-      patchOps.push({
-        op: 'add',
-        path: '/notes/-',
-        value: {
-          datetime: new Date().toISOString(),
-          event_type: 'system_log',
-          agent_email,
-          event: `Quality Control had change this ticket: "${ticket.status || 'Unknown'}" → "${newStatus}"`
-        }
-      });
+      if (event) {
+        patchOps.push({
+          op: 'add',
+          path: '/notes/-',
+          value: {
+            datetime: new Date().toISOString(),
+            event_type: 'system_log',
+            agent_email,
+            event
+          }
+        });
+      }
 
-      await item.patch(patchOps);
-      const { resource: updated } = await item.read();
+      if (patchOps.length === 0) {
+        return badRequest('No valid operations to apply.');
+      }
+
+      await ticketItem.patch(patchOps);
+
+      const { resource: updated } = await ticketItem.read();
 
       const responseData = {
         id: updated.id,
@@ -103,14 +135,11 @@ app.http('cosmoUpdateStatusQuality', {
         status: updated.status,
         agent_assigned: updated.agent_assigned,
         tiket_source: updated.tiket_source,
-        phone: updated.phone,
-        work_time: updated.work_time,
-        aiClassification: updated.aiClassification,
         quality_control: updated.quality_control,
-        linked_patient_snapshot: updated.linked_patient_snapshot
+        phone: updated.phone,
+        work_time: updated.work_time
       };
 
-      // Notificar por SignalR
       try {
         await fetch(signalRUrl, {
           method: 'POST',
@@ -121,20 +150,13 @@ app.http('cosmoUpdateStatusQuality', {
         context.log('⚠️ SignalR failed:', e.message);
       }
 
-      try {
-        await fetch(signalRUrlStats, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData)
-        });
-      } catch (e) {
-        context.log('⚠️ SignalR failed stats:', e.message);
-      }
 
-      return success('Status updated successfully.', { responseData });
+      return success('Notes updated successfully.', {
+        applied_operations: patchOps.length
+      });
 
     } catch (err) {
-      context.log('❌ Error updating status:', err);
+      context.log('❌ Error updating notes:', err);
       return error('Internal Server Error', 500, err.message);
     }
   }
