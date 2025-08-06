@@ -115,6 +115,7 @@ app.http('cosmoUpdatePatientBOD', {
         agent_assigned: updated.agent_assigned,
         tiket_source: updated.tiket_source,
         phone: updated.phone,
+        quality_control: updated.quality_control,
         work_time: updated.work_time
       };
 

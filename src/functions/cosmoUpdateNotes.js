@@ -137,6 +137,7 @@ app.http('cosmoUpdateNotes', {
         status: updated.status,
         agent_assigned: updated.agent_assigned,
         tiket_source: updated.tiket_source,
+        quality_control: updated.quality_control,
         phone: updated.phone,
         work_time: updated.work_time
       };

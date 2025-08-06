@@ -111,6 +111,7 @@ app.http('cosmoUpdatePatientName', {
         tiket_source: updated.tiket_source,
         phone: updated.phone,
         work_time: updated.work_time,
+        quality_control: updated.quality_control,
         linked_patient_snapshot: updated.linked_patient_snapshot,
       };
 
