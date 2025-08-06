@@ -219,6 +219,7 @@ app.http('cosmoInsertVapi', {
       caller_type: body.message.analysis.structuredData?.llamada,
       call_duration: body.message.durationSeconds,
       status: 'New',
+      quality_control: false,
       agent_assigned: '',
       tiket_source: 'Phone',
       collaborators: [],
