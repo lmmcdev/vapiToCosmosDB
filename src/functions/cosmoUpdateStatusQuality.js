@@ -42,12 +42,7 @@ app.http('cosmoUpdateStatusQuality', {
       const agent = agents[0];
       const role = agent.agent_rol || 'Agent';
 
-      const isAssigned = ticket.agent_assigned === agent_email;
-      const isCollaborator = Array.isArray(ticket.collaborators) && ticket.collaborators.includes(agent_email);
-      //Rol name
       const isQuality = role === 'Quality';
-
-      // Reglas de acceso generales
       if (!isQuality) {
         return badRequest('You do not have permission to change this ticket\'s status.');
       }
@@ -56,7 +51,7 @@ app.http('cosmoUpdateStatusQuality', {
         return badRequest('New status is the same as the current one. No changes applied.');
       }
 
-      const quality_control = newStatus === 'QARevisionStart' ? true : false;
+      const quality_control = newStatus === 'QARevisionStart';
 
       const patchOps = [];
 
@@ -65,10 +60,13 @@ app.http('cosmoUpdateStatusQuality', {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
-      // Reemplazar status
-      patchOps.push({ op: 'replace', path: '/quality_control', value: quality_control });
+      // quality_control: si no existe => add, si existe => replace
+      if (typeof ticket.quality_control === 'undefined') {
+        patchOps.push({ op: 'add', path: '/quality_control', value: quality_control });
+      } else {
+        patchOps.push({ op: 'replace', path: '/quality_control', value: quality_control });
+      }
 
-      
       // Agregar nota de sistema
       patchOps.push({
         op: 'add',
@@ -110,10 +108,9 @@ app.http('cosmoUpdateStatusQuality', {
         aiClassification: updated.aiClassification,
         quality_control: updated.quality_control,
         linked_patient_snapshot: updated.linked_patient_snapshot
-
       };
 
-      // SignalR notificaciones
+      // Notificar por SignalR
       try {
         await fetch(signalRUrl, {
           method: 'POST',
