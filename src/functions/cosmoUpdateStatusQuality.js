@@ -78,6 +78,14 @@ app.http('cosmoUpdateStatusQuality', {
           id: ticketId,
           ticketId,
           agent_email,
+          status,
+          linked_patient_snapshot,
+          patient_id,
+          aiClassification,
+          patient_name,
+          patient_dob,
+          phone,
+          agent_assigned,
           startDate: new Date().toISOString()
         });
       } else {
