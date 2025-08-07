@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
+const { getQAContainer } = require('../shared/cosmoQAClient'); // contenedor QC
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
@@ -14,37 +15,32 @@ app.http('cosmoUpdateStatusQuality', {
 
     try {
       ({ ticketId, newStatus, agent_email } = await req.json());
-    } catch (err) {
+    } catch {
       return badRequest('Invalid JSON.');
     }
-
     if (!ticketId || !newStatus || !agent_email) {
       return badRequest('Missing parameters: ticketId, status or agent_email.');
     }
 
     const container = getContainer();
     const agentContainer = getAgentContainer();
-    const item = container.item(ticketId, ticketId);
+    const qcContainer = getQAContainer();
 
+    const item = container.item(ticketId, ticketId);
     try {
       const { resource: ticket } = await item.read();
       if (!ticket) return notFound('Ticket not found.');
 
-      // Buscar agente
-      const query = {
+      // Validar rol del agente
+      const querySpec = {
         query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
         parameters: [{ name: '@agent_email', value: agent_email }]
       };
-
-      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
+      const { resources: agents } = await agentContainer.items.query(querySpec).fetchAll();
       if (!agents.length) return badRequest('Agent not found.');
-
       const agent = agents[0];
-      const role = agent.agent_rol || 'Agent';
-
-      const isQuality = role === 'Quality';
-      if (!isQuality) {
-        return badRequest('You do not have permission to change this ticket\'s status.');
+      if (agent.agent_rol !== 'Quality') {
+        return badRequest("You do not have permission to change this ticket's status.");
       }
 
       if (ticket.status === newStatus) {
@@ -52,22 +48,16 @@ app.http('cosmoUpdateStatusQuality', {
       }
 
       const quality_control = newStatus === 'QARevisionStart';
-
       const patchOps = [];
 
-      // Asegurar array de notas
       if (!Array.isArray(ticket.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
-
-      // quality_control: si no existe => add, si existe => replace
-      if (typeof ticket.quality_control === 'undefined') {
-        patchOps.push({ op: 'add', path: '/quality_control', value: quality_control });
-      } else {
-        patchOps.push({ op: 'replace', path: '/quality_control', value: quality_control });
-      }
-
-      // Agregar nota de sistema
+      patchOps.push({
+        op: typeof ticket.quality_control === 'undefined' ? 'add' : 'replace',
+        path: '/quality_control',
+        value: quality_control
+      });
       patchOps.push({
         op: 'add',
         path: '/notes/-',
@@ -75,12 +65,26 @@ app.http('cosmoUpdateStatusQuality', {
           datetime: new Date().toISOString(),
           event_type: 'system_log',
           agent_email,
-          event: `Quality Control had change this ticket: "${ticket.status || 'Unknown'}" → "${newStatus}"`
+          event: `Quality Control changed status: "${ticket.status || 'Unknown'}" → "${newStatus}"`
         }
       });
 
       await item.patch(patchOps);
       const { resource: updated } = await item.read();
+
+      // Registrar o eliminar en quality_control_tickets según status
+      if (quality_control) {
+        await qcContainer.items.create({
+          id: ticketId,
+          ticketId,
+          agent_email,
+          startDate: new Date().toISOString()
+        });
+      } else {
+        await qcContainer.item(ticketId, ticketId).delete().catch(e => {
+          context.log('⚠️ Failed to delete QC entry:', e.message);
+        });
+      }
 
       const responseData = {
         id: updated.id,
@@ -110,26 +114,20 @@ app.http('cosmoUpdateStatusQuality', {
         linked_patient_snapshot: updated.linked_patient_snapshot
       };
 
-      // Notificar por SignalR
-      try {
-        await fetch(signalRUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData)
-        });
-      } catch (e) {
-        context.log('⚠️ SignalR failed:', e.message);
-      }
-
-      try {
-        await fetch(signalRUrlStats, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData)
-        });
-      } catch (e) {
-        context.log('⚠️ SignalR failed stats:', e.message);
-      }
+      // Notificaciones via SignalR
+      const sendSignal = async (url) => {
+        try {
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(responseData)
+          });
+        } catch (e) {
+          context.log(`⚠️ SignalR failed (${url}):`, e.message);
+        }
+      };
+      await sendSignal(signalRUrl);
+      await sendSignal(signalRUrlStats);
 
       return success('Status updated successfully.', { responseData });
 
