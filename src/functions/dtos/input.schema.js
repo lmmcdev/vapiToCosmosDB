@@ -39,26 +39,31 @@ const updateTicketStatusInput = Joi.object({
 const updateTicketNotesInput = Joi.object({
   ticketId: Joi.string().uuid().required().label('ticketId'),
   agent_email: Joi.string().email().required().label('agent_email'),
+
   notes: Joi.array()
     .items(
       Joi.object({
-        agent_email: Joi.string().email().required().label('agent_email'),
-        event: Joi.string().optional().label('event'),
-        datetime: Joi.string().isoDate().optional().label('datetime'),
-        event_type: Joi.string().valid('user_note', 'system_log').optional().label('event_type')
+        agent_email: Joi.string().email().required().label('note.agent_email'),
+        event_type: Joi.string().valid('user_note', 'system_log').required().label('note.event_type'),
+        content: Joi.string().min(1).max(1000).required().label('note.content'),
+        datetime: Joi.string().isoDate().optional().label('note.datetime')
       })
     )
     .optional()
     .label('notes'),
+
   event: Joi.string().optional().label('event')
-}).custom((value, helpers) => {
-  if (!value.notes && !value.event) {
-    return helpers.error('any.custom', {
-      message: 'At least one of "notes" or "event" must be provided.'
-    });
-  }
-  return value;
-}).label('updateTicketNotesInput');
+})
+  .custom((value, helpers) => {
+    if (!value.notes && !value.event) {
+      return helpers.error('any.custom', {
+        message: 'At least one of "notes" or "event" must be provided.'
+      });
+    }
+    return value;
+  })
+  .label('updateTicketNotesInput');
+
 
 
 // 🟨 Esquema: Actualización de fecha de nacimiento del paciente
