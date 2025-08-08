@@ -1,175 +1,128 @@
+// src/functions/cosmoUpdateStatus/index.js
+const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
+const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
-const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
-const signalrClosedTicket = process.env.SIGNAL_BROADCAST_URL4;
+const signalRUrl       = process.env.SIGNAL_BROADCAST_URL2;
+const signalRUrlStats  = process.env.SIGNAL_BROADCAST_URL3;
+const signalRClosed    = process.env.SIGNAL_BROADCAST_URL4;
 
 app.http('cosmoUpdateStatus', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
-  handler: async (req, context) => {
+  handler: async (request, context) => {
+    // 1. Parse request
     let ticketId, newStatus, agent_email;
-
     try {
-      ({ ticketId, newStatus, agent_email } = await req.json());
-    } catch (err) {
+      ({ ticketId, newStatus, agent_email } = await request.json());
+    } catch {
       return badRequest('Invalid JSON.');
     }
-
     if (!ticketId || !newStatus || !agent_email) {
       return badRequest('Missing parameters: ticketId, newStatus or agent_email.');
     }
 
-    const container = getContainer();
-    const agentContainer = getAgentContainer();
-    const item = container.item(ticketId, ticketId);
-
+    // 2. Read ticket
+    const item = getContainer().item(ticketId, ticketId);
+    let existing;
     try {
-      const { resource: ticket } = await item.read();
-      if (!ticket) return notFound('Ticket not found.');
-
-      // Buscar agente
-      const query = {
-        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
-        parameters: [{ name: '@agent_email', value: agent_email }]
-      };
-
-      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
-      if (!agents.length) return badRequest('Agent not found.');
-
-      const agent = agents[0];
-      const role = agent.agent_rol || 'Agent';
-
-      const isAssigned = ticket.agent_assigned === agent_email;
-      const isCollaborator = Array.isArray(ticket.collaborators) && ticket.collaborators.includes(agent_email);
-      const isSupervisor = role === 'Supervisor';
-
-      // Reglas de acceso generales
-      if (!isAssigned && !isCollaborator && !isSupervisor) {
-        return badRequest('You do not have permission to change this ticket\'s status.');
-      }
-
-      // Reglas específicas para "Done"
-      if (newStatus === 'Done' && !isAssigned && !isCollaborator && !isSupervisor) {
-        return badRequest('Only assigned agent, a collaborator, or a supervisor can mark the ticket as Done.');
-      }
-
-      if (ticket.status === newStatus) {
-        return badRequest('New status is the same as the current one. No changes applied.');
-      }
-
-      const patchOps = [];
-
-      // Asegurar array de notas
-      if (!Array.isArray(ticket.notes)) {
-        patchOps.push({ op: 'add', path: '/notes', value: [] });
-      }
-
-      // Reemplazar status
-      patchOps.push({ op: 'replace', path: '/status', value: newStatus });
-
-      // Manejo del campo closedAt
-      if (newStatus === 'Done') {
-        patchOps.push({
-          op: ticket.closedAt ? 'replace' : 'add',
-          path: '/closedAt',
-          value: new Date().toISOString()
-        });
-      } else if (ticket.status === 'Done' && ticket.closedAt) {
-        patchOps.push({
-          op: 'replace',
-          path: '/closedAt',
-          value: null
-        });
-      }
-
-      // Agregar nota de sistema
-      patchOps.push({
-        op: 'add',
-        path: '/notes/-',
-        value: {
-          datetime: new Date().toISOString(),
-          event_type: 'system_log',
-          agent_email,
-          event: `Status changed: "${ticket.status || 'Unknown'}" → "${newStatus}"`
-        }
-      });
-
-      await item.patch(patchOps);
-      const { resource: updated } = await item.read();
-
-      const responseData = {
-        id: updated.id,
-        summary: updated.summary,
-        call_reason: updated.call_reason,
-        creation_date: updated.creation_date,
-        patient_name: updated.patient_name,
-        patient_dob: updated.patient_dob,
-        caller_name: updated.caller_name,
-        callback_number: updated.callback_number,
-        caller_id: updated.caller_id,
-        call_cost: updated.call_cost,
-        notes: updated.notes,
-        collaborators: updated.collaborators,
-        url_audio: updated.url_audio,
-        assigned_department: updated.assigned_department,
-        assigned_role: updated.assigned_role,
-        caller_type: updated.caller_type,
-        call_duration: updated.call_duration,
-        status: updated.status,
-        agent_assigned: updated.agent_assigned,
-        tiket_source: updated.tiket_source,
-        phone: updated.phone,
-        work_time: updated.work_time,
-        aiClassification: updated.aiClassification,
-        quality_control: updated.quality_control,
-        linked_patient_snapshot: updated.linked_patient_snapshot
-
-      };
-
-      // SignalR notificaciones
-      try {
-        await fetch(signalRUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData)
-        });
-      } catch (e) {
-        context.log('⚠️ SignalR failed:', e.message);
-      }
-
-      try {
-        await fetch(signalRUrlStats, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData)
-        });
-      } catch (e) {
-        context.log('⚠️ SignalR failed stats:', e.message);
-      }
-
-      if(newStatus==='Done'  || ticket.status === 'Done') {
-        try {
-          await fetch(signalrClosedTicket, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(responseData)
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed stats:', e.message);
-        }
-      }
-
-      return success('Status updated successfully.', {
-        applied_operations: patchOps.length
-      });
-
-    } catch (err) {
-      context.log('❌ Error updating status:', err);
-      return error('Internal Server Error', 500, err.message);
+      ({ resource: existing } = await item.read());
+    } catch (e) {
+      return error('Error reading ticket.', 500, e.message);
     }
+    if (!existing) return notFound('Ticket not found.');
+
+    // 3. Authorization
+    const { resources: agents } = await getAgentContainer().items
+      .query({ query: 'SELECT * FROM c WHERE c.agent_email=@agent_email', parameters:[{name:'@agent_email',value:agent_email}] })
+      .fetchAll();
+    if (!agents.length) return badRequest('Agent not found.');
+    const role = agents[0].agent_rol || 'Agent';
+    const isAllowed =
+      existing.agent_assigned === agent_email ||
+      (Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email)) ||
+      role === 'Supervisor';
+    if (!isAllowed) {
+      return badRequest(`You do not have permission to change this ticket's status.`);
+    }
+
+    // 4. If no change
+    if (existing.status === newStatus) {
+      return badRequest('New status is the same as current.');
+    }
+
+    // 5. Build patchOps
+    const patchOps = [];
+    if (!Array.isArray(existing.notes)) {
+      patchOps.push({ op: 'add', path: '/notes', value: [] });
+    }
+    patchOps.push({ op: 'replace', path: '/status', value: newStatus });
+
+    if (newStatus === 'Done') {
+      patchOps.push({
+        op: existing.closedAt ? 'replace' : 'add',
+        path: '/closedAt',
+        value: new Date().toISOString()
+      });
+    } else if (existing.status === 'Done' && existing.closedAt) {
+      patchOps.push({ op: 'replace', path: '/closedAt', value: null });
+    }
+
+    patchOps.push({
+      op: 'add',
+      path: '/notes/-',
+      value: {
+        datetime: new Date().toISOString(),
+        event_type: 'system_log',
+        agent_email,
+        event: `Status changed: "${existing.status}" → "${newStatus}"`
+      }
+    });
+
+    // 6. Apply patch & re-read
+    try {
+      await item.patch(patchOps);
+      ({ resource: existing } = await item.read());
+    } catch (e) {
+      return error('Error updating status.', 500, e.message);
+    }
+
+    // 7. Validate & format DTO
+    let formattedDto;
+    try {
+      formattedDto = validateAndFormatTicket(existing, badRequest, context);
+    } catch (badReq) {
+      return badReq;
+    }
+
+    // 8. SignalR notifications
+    for (const url of [signalRUrl, signalRUrlStats]) {
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formattedDto)
+        });
+      } catch (e) {
+        context.log(`⚠️ SignalR failed for ${url}:`, e.message);
+      }
+    }
+    if (newStatus === 'Done' || existing.status === 'Done') {
+      try {
+        await fetch(signalRClosed, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formattedDto)
+        });
+      } catch (e) {
+        context.log('⚠️ SignalR closedTickets failed:', e.message);
+      }
+    }
+
+    // 9. Return response
+    return success('Status updated successfully.', formattedDto);
   }
 });
