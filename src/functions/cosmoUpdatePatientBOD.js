@@ -1,9 +1,11 @@
 const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+const { updatePatientDOBInput } = require('./dtos/input.schema');
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
@@ -11,26 +13,24 @@ app.http('cosmoUpdatePatientBOD', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    // 1. Parse request
-    let ticketId, agent_email, nueva_fechanacimiento;
+    // 1. Validar entrada
+    let input;
     try {
-      ({ tickets: ticketId, agent_email, nueva_fechanacimiento } = await request.json());
+      const body = await request.json();
+      const { error: validationError, value } = updatePatientDOBInput.validate(body, { abortEarly: false });
+      if (validationError) {
+        context.log('Validation failed:', validationError.details);
+        return badRequest('Invalid input.', validationError.details);
+      }
+      input = value;
     } catch {
       return badRequest('Invalid JSON');
     }
-    if (!ticketId || !agent_email || !nueva_fechanacimiento) {
-      return badRequest('Missing parameters: tickets, agent_email or nueva_fechanacimiento.');
-    }
 
-    // 2. Validate date format MM/DD/YYYY
-    const fechaRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/;
-    if (!fechaRegex.test(nueva_fechanacimiento)) {
-      return badRequest('Invalid date format. Use MM/DD/YYYY (e.g., 06/15/1985).');
-    }
+    const { tickets: ticketId, agent_email, nueva_fechanacimiento } = input;
 
-    // 3. Read ticket
-    const container = getContainer();
-    const item = container.item(ticketId, ticketId);
+    // 2. Leer ticket
+    const item = getContainer().item(ticketId, ticketId);
     let existing;
     try {
       ({ resource: existing } = await item.read());
@@ -39,31 +39,42 @@ app.http('cosmoUpdatePatientBOD', {
     }
     if (!existing) return notFound('Ticket not found.');
 
-    // 4. Authorization
-    const agentQ = {
+    // 3. Verificar autorización
+    const agentQuery = {
       query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
       parameters: [{ name: '@agent_email', value: agent_email }]
     };
-    const { resources: agents } = await getAgentContainer().items.query(agentQ).fetchAll();
-    if (!agents.length) return badRequest('Agent not found.');
-    const role = agents[0].agent_rol || 'Agent';
-    const isAssigned     = existing.agent_assigned === agent_email;
+
+    let agentData;
+    try {
+      const { resources } = await getAgentContainer().items.query(agentQuery).fetchAll();
+      if (!resources.length) return badRequest('Agent not found.');
+      agentData = resources[0];
+    } catch (e) {
+      return error('Error querying agent information.', 500, e.message);
+    }
+
+    const isAssigned = existing.agent_assigned === agent_email;
     const isCollaborator = Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email);
-    const isSupervisor   = role === 'Supervisor';
+    const isSupervisor = agentData.agent_rol === 'Supervisor';
+
     if (!isAssigned && !isCollaborator && !isSupervisor) {
       return badRequest('You do not have permission to update the patient DOB.');
     }
 
-    // 5. Build patchOps
+    // 4. Construir patchOps
     const patchOps = [];
+
     patchOps.push({
       op: existing.patient_dob === undefined ? 'add' : 'replace',
       path: '/patient_dob',
       value: nueva_fechanacimiento
     });
+
     if (!Array.isArray(existing.notes)) {
       patchOps.push({ op: 'add', path: '/notes', value: [] });
     }
+
     patchOps.push({
       op: 'add',
       path: '/notes/-',
@@ -75,7 +86,7 @@ app.http('cosmoUpdatePatientBOD', {
       }
     });
 
-    // 6. Apply patch and re-read
+    // 5. Aplicar patch
     try {
       await item.patch(patchOps);
       ({ resource: existing } = await item.read());
@@ -83,7 +94,7 @@ app.http('cosmoUpdatePatientBOD', {
       return error('Error updating patient DOB.', 500, e.message);
     }
 
-    // 7. Validate & format DTO
+    // 6. Validar y formatear salida
     let formattedDto;
     try {
       formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -91,7 +102,7 @@ app.http('cosmoUpdatePatientBOD', {
       return badReq;
     }
 
-    // 8. Notify via SignalR
+    // 7. Notificar por SignalR
     try {
       await fetch(signalRUrl, {
         method: 'POST',
@@ -102,7 +113,7 @@ app.http('cosmoUpdatePatientBOD', {
       context.log('⚠️ SignalR failed:', e.message);
     }
 
-    // 9. Return success
+    // 8. Responder
     return success('Patient DOB updated successfully.', formattedDto);
   }
 });

@@ -1,10 +1,11 @@
-// src/functions/cosmoUpdateTicketDepartment/index.js
 const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+const { updateTicketDepartmentInput } = require('./dtos/input.schema');
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
@@ -12,18 +13,23 @@ app.http('cosmoUpdateTicketDepartment', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    // 1. Parse request
-    let ticketId, newDepartment, agent_email;
+    // 1. Validar entrada
+    let input;
     try {
-      ({ ticketId, newDepartment, agent_email } = await request.json());
+      const body = await request.json();
+      const { error: validationError, value } = updateTicketDepartmentInput.validate(body, { abortEarly: false });
+      if (validationError) {
+        context.log('Validation failed:', validationError.details);
+        return badRequest('Invalid input.', validationError.details);
+      }
+      input = value;
     } catch {
       return badRequest('Invalid JSON payload.');
     }
-    if (!ticketId || !newDepartment || !agent_email) {
-      return badRequest('Missing parameters: ticketId, newDepartment, or agent_email.');
-    }
 
-    // 2. Read existing ticket
+    const { tickets: ticketId, newDepartment, agent_email } = input;
+
+    // 2. Leer ticket
     const ticketItem = getContainer().item(ticketId, ticketId);
     let existing;
     try {
@@ -33,32 +39,40 @@ app.http('cosmoUpdateTicketDepartment', {
     }
     if (!existing) return notFound('Ticket not found.');
 
-    // 3. Authorization
-    const agentQ = {
-      query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
-      parameters: [{ name: '@agent_email', value: agent_email }]
-    };
-    const { resources: agents } = await getAgentContainer().items.query(agentQ).fetchAll();
-    if (!agents.length) return badRequest('Agent not found in the system.');
-    const agentData    = agents[0];
-    const agentRole    = agentData.agent_rol || 'Agent';
-    const isAssigned   = existing.agent_assigned === agent_email;
+    // 3. Verificar autorización
+    let agentData;
+    try {
+      const { resources } = await getAgentContainer().items.query({
+        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
+        parameters: [{ name: '@agent_email', value: agent_email }]
+      }).fetchAll();
+      if (!resources.length) return badRequest('Agent not found in the system.');
+      agentData = resources[0];
+    } catch (e) {
+      return error('Error fetching agent info.', 500, e.message);
+    }
+
+    const role = agentData.agent_rol || 'Agent';
+    const isAssigned = existing.agent_assigned === agent_email;
     const isCollaborator = Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email);
-    const isSupervisor = agentRole === 'Supervisor';
+    const isSupervisor = role === 'Supervisor';
+
     if (!isAssigned && !isCollaborator && !isSupervisor) {
       return badRequest('You do not have permission to update this ticket.');
     }
 
-    // 4. Prevent no-op
+    // 4. Evitar cambio redundante
     if (existing.assigned_department === newDepartment) {
       return badRequest('The department is already set to the desired value.');
     }
 
-    // 5. Build patch operations
+    // 5. Construir operaciones PATCH
     const patchOps = [];
+
     if (!Array.isArray(existing.notes)) {
       patchOps.push({ op: 'add', path: '/notes', value: [] });
     }
+
     patchOps.push({ op: 'replace', path: '/assigned_department', value: newDepartment });
     patchOps.push({ op: 'replace', path: '/agent_assigned', value: '' });
     patchOps.push({ op: 'replace', path: '/collaborators', value: [] });
@@ -81,7 +95,7 @@ app.http('cosmoUpdateTicketDepartment', {
       }
     });
 
-    // 6. Apply patch & re-read
+    // 6. Aplicar cambios
     try {
       await ticketItem.patch(patchOps);
       ({ resource: existing } = await ticketItem.read());
@@ -89,7 +103,7 @@ app.http('cosmoUpdateTicketDepartment', {
       return error('Error updating department.', 500, e.message);
     }
 
-    // 7. Validate & format DTO
+    // 7. Validar & formatear salida
     let formattedDto;
     try {
       formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -97,7 +111,7 @@ app.http('cosmoUpdateTicketDepartment', {
       return badReq;
     }
 
-    // 8. SignalR notification
+    // 8. Notificar SignalR
     try {
       await fetch(signalRUrl, {
         method: 'POST',
@@ -108,7 +122,7 @@ app.http('cosmoUpdateTicketDepartment', {
       context.log('⚠️ SignalR failed:', e.message);
     }
 
-    // 9. Return response
+    // 9. Retornar respuesta
     return success('Department updated successfully.', formattedDto);
   }
 });

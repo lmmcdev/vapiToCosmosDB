@@ -4,9 +4,11 @@ const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const { app } = require('@azure/functions');
+
 const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+const { updateWorkTimeInput } = require('./dtos/input.schema');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -17,18 +19,23 @@ app.http('cosmoUpdateWorkTime', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    // 1. Parse request
-    let ticketId, agent_email, workTime, currentStatus;
+    // 1. Parse and validate input
+    let input;
     try {
-      ({ tickets: ticketId, agent_email, workTime, currentStatus } = await request.json());
+      const body = await request.json();
+      const { error: validationError, value } = updateWorkTimeInput.validate(body, { abortEarly: false });
+      if (validationError) {
+        context.log('Validation failed:', validationError.details);
+        return badRequest('Invalid input.', validationError.details);
+      }
+      input = value;
     } catch {
       return badRequest('Invalid JSON');
     }
-    if (!ticketId || !agent_email || workTime == null || !currentStatus) {
-      return badRequest('Your request must include: tickets, agent_email, workTime, currentStatus');
-    }
 
-    // 2. Read existing ticket
+    const { tickets: ticketId, agent_email, workTime, currentStatus } = input;
+
+    // 2. Read ticket
     const item = getContainer().item(ticketId, ticketId);
     let existing;
     try {
@@ -39,18 +46,21 @@ app.http('cosmoUpdateWorkTime', {
     if (!existing) return badRequest('Ticket not found.');
 
     // 3. Authorization
-    const assigned     = existing.agent_assigned?.toLowerCase();
+    const requester = agent_email.toLowerCase();
+    const assigned = existing.agent_assigned?.toLowerCase();
     const collaborators = (existing.collaborators || []).map(c => c.toLowerCase());
-    const requester    = agent_email.toLowerCase();
+
     if (requester !== assigned && !collaborators.includes(requester)) {
       return badRequest(`Agent ${agent_email} is not authorized to log work time on this ticket.`);
     }
 
-    // 4. Build patch operations
+    // 4. Prepare patch operations
     const patchOps = [];
+
     if (!Array.isArray(existing.notes)) {
       patchOps.push({ op: 'add', path: '/notes', value: [] });
     }
+
     patchOps.push({
       op: 'add',
       path: '/notes/-',
@@ -64,6 +74,7 @@ app.http('cosmoUpdateWorkTime', {
 
     const now = dayjs().tz('America/New_York');
     const creation_date = now.format('MM/DD/YYYY, HH:mm');
+
     const workTimeEntry = {
       ticketId,
       agentEmail: agent_email,
@@ -78,7 +89,7 @@ app.http('cosmoUpdateWorkTime', {
       patchOps.push({ op: 'add', path: '/work_time/-', value: workTimeEntry });
     }
 
-    // 5. Apply patch & re-read
+    // 5. Apply patch
     try {
       await item.patch(patchOps);
       ({ resource: existing } = await item.read());
@@ -86,7 +97,7 @@ app.http('cosmoUpdateWorkTime', {
       return error('Error registering working time.', 500, e.message);
     }
 
-    // 6. Validate & format via DTO helper
+    // 6. Format response
     let formattedDto;
     try {
       formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -94,7 +105,7 @@ app.http('cosmoUpdateWorkTime', {
       return badReq;
     }
 
-    // 7. SignalR notification
+    // 7. Notify via SignalR
     try {
       await fetch(signalRUrl, {
         method: 'POST',
@@ -105,7 +116,7 @@ app.http('cosmoUpdateWorkTime', {
       context.log('⚠️ SignalR failed:', e.message);
     }
 
-    // 8. Return response
+    // 8. Return success response
     return success(
       `Working time on the ticket registered: ${workTime}`,
       { agent: agent_email, work_time_entry: workTimeEntry }

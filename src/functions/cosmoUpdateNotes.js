@@ -1,10 +1,11 @@
-// src/functions/cosmoUpdateNotes/index.js
 const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+const { updateTicketNotesInput } = require('./dtos/input.schema');
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
@@ -12,29 +13,23 @@ app.http('cosmoUpdateNotes', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    // 1. Parse request
-    let ticketId, notes, agent_email, event;
+    // 1. Validar entrada
+    let input;
     try {
-      ({ ticketId, notes, agent_email, event } = await request.json());
+      const body = await request.json();
+      const { error: validationError, value } = updateTicketNotesInput.validate(body, { abortEarly: false });
+      if (validationError) {
+        context.log('Validation failed:', validationError.details);
+        return badRequest('Invalid input.', validationError.details);
+      }
+      input = value;
     } catch {
       return badRequest('Invalid JSON.');
     }
-    if (!ticketId || !agent_email) {
-      return badRequest('Missing parameters: ticketId or agent_email.');
-    }
-    if (!Array.isArray(notes) && !event) {
-      return badRequest('Missing notes array or event.');
-    }
-    if (Array.isArray(notes)) {
-      for (let i = 0; i < notes.length; i++) {
-        const note = notes[i];
-        if (typeof note !== 'object' || !note.agent_email || typeof note.agent_email !== 'string') {
-          return badRequest(`Note at index ${i} is missing a valid 'agent_email'.`);
-        }
-      }
-    }
 
-    // 2. Read ticket
+    const { ticketId, notes, agent_email, event } = input;
+
+    // 2. Leer ticket
     const container = getContainer();
     const item = container.item(ticketId, ticketId);
     let existing;
@@ -45,26 +40,36 @@ app.http('cosmoUpdateNotes', {
     }
     if (!existing) return notFound('Ticket not found.');
 
-    // 3. Authorization
-    const agentQ = {
+    // 3. Verificar autorización
+    const agentQuery = {
       query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
       parameters: [{ name: '@agent_email', value: agent_email }]
     };
-    const { resources: agents } = await getAgentContainer().items.query(agentQ).fetchAll();
-    if (!agents.length) return badRequest('Agent not found.');
-    const role = agents[0].agent_rol || 'Agent';
-    const isAssigned     = existing.agent_assigned === agent_email;
+
+    let agentData;
+    try {
+      const { resources } = await getAgentContainer().items.query(agentQuery).fetchAll();
+      if (!resources.length) return badRequest('Agent not found.');
+      agentData = resources[0];
+    } catch (e) {
+      return error('Error querying agent information.', 500, e.message);
+    }
+
+    const isAssigned = existing.agent_assigned === agent_email;
     const isCollaborator = Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email);
-    const isSupervisor   = role === 'Supervisor';
+    const isSupervisor = agentData.agent_rol === 'Supervisor';
+
     if (!isAssigned && !isCollaborator && !isSupervisor) {
       return badRequest('You do not have permission to update notes on this ticket.');
     }
 
-    // 4. Build patch operations
+    // 4. Construir operaciones PATCH
     const patchOps = [];
+
     if (!Array.isArray(existing.notes)) {
       patchOps.push({ op: 'add', path: '/notes', value: [] });
     }
+
     if (Array.isArray(notes) && notes.length > 0) {
       for (const note of notes) {
         patchOps.push({
@@ -77,6 +82,7 @@ app.http('cosmoUpdateNotes', {
           }
         });
       }
+
       patchOps.push({
         op: 'add',
         path: '/notes/-',
@@ -88,6 +94,7 @@ app.http('cosmoUpdateNotes', {
         }
       });
     }
+
     if (event) {
       patchOps.push({
         op: 'add',
@@ -100,11 +107,12 @@ app.http('cosmoUpdateNotes', {
         }
       });
     }
+
     if (patchOps.length === 0) {
       return badRequest('No valid operations to apply.');
     }
 
-    // 5. Apply patch and read updated
+    // 5. Aplicar patch y releer
     try {
       await item.patch(patchOps);
       ({ resource: existing } = await item.read());
@@ -112,7 +120,7 @@ app.http('cosmoUpdateNotes', {
       return error('Error updating notes.', 500, e.message);
     }
 
-    // 6. Validate & format via helper
+    // 6. Formatear DTO
     let formattedDto;
     try {
       formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -120,7 +128,7 @@ app.http('cosmoUpdateNotes', {
       return badReq;
     }
 
-    // 7. SignalR notification
+    // 7. Notificar via SignalR
     try {
       await fetch(signalRUrl, {
         method: 'POST',
@@ -131,7 +139,10 @@ app.http('cosmoUpdateNotes', {
       context.log('⚠️ SignalR failed:', e.message);
     }
 
-    // 8. Return success
-    return success('Notes updated successfully.', { applied_operations: patchOps.length, ticket: formattedDto });
+    // 8. Respuesta final
+    return success('Notes updated successfully.', {
+      applied_operations: patchOps.length,
+      ticket: formattedDto
+    });
   }
 });

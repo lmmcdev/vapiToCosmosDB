@@ -1,29 +1,36 @@
 // src/functions/cosmoUpdateStatus/index.js
 const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+const { updateTicketStatusInput } = require('./dtos/input.schema');
 
-const signalRUrl       = process.env.SIGNAL_BROADCAST_URL2;
-const signalRUrlStats  = process.env.SIGNAL_BROADCAST_URL3;
-const signalRClosed    = process.env.SIGNAL_BROADCAST_URL4;
+const signalRUrl      = process.env.SIGNAL_BROADCAST_URL2;
+const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
+const signalRClosed   = process.env.SIGNAL_BROADCAST_URL4;
 
 app.http('cosmoUpdateStatus', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    // 1. Parse request
-    let ticketId, newStatus, agent_email;
+    // 1. Parse and validate input
+    let input;
     try {
-      ({ ticketId, newStatus, agent_email } = await request.json());
+      const body = await request.json();
+      const { error: validationError, value } = updateTicketStatusInput.validate(body, { abortEarly: false });
+      if (validationError) {
+        context.log('Validation failed:', validationError.details);
+        return badRequest('Invalid input.', validationError.details);
+      }
+      input = value;
     } catch {
       return badRequest('Invalid JSON.');
     }
-    if (!ticketId || !newStatus || !agent_email) {
-      return badRequest('Missing parameters: ticketId, newStatus or agent_email.');
-    }
+
+    const { ticketId, newStatus, agent_email } = input;
 
     // 2. Read ticket
     const item = getContainer().item(ticketId, ticketId);
@@ -35,32 +42,45 @@ app.http('cosmoUpdateStatus', {
     }
     if (!existing) return notFound('Ticket not found.');
 
-    // 3. Authorization
-    const { resources: agents } = await getAgentContainer().items
-      .query({ query: 'SELECT * FROM c WHERE c.agent_email=@agent_email', parameters:[{name:'@agent_email',value:agent_email}] })
-      .fetchAll();
-    if (!agents.length) return badRequest('Agent not found.');
-    const role = agents[0].agent_rol || 'Agent';
+    // 3. Authorization check
+    let agentInfo;
+    try {
+      const { resources } = await getAgentContainer().items
+        .query({
+          query: 'SELECT * FROM c WHERE c.agent_email=@agent_email',
+          parameters: [{ name: '@agent_email', value: agent_email }]
+        })
+        .fetchAll();
+      if (!resources.length) return badRequest('Agent not found.');
+      agentInfo = resources[0];
+    } catch (e) {
+      return error('Error querying agent information.', 500, e.message);
+    }
+
     const isAllowed =
       existing.agent_assigned === agent_email ||
       (Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email)) ||
-      role === 'Supervisor';
+      agentInfo.agent_rol === 'Supervisor';
+
     if (!isAllowed) {
       return badRequest(`You do not have permission to change this ticket's status.`);
     }
 
-    // 4. If no change
+    // 4. Prevent duplicate status
     if (existing.status === newStatus) {
       return badRequest('New status is the same as current.');
     }
 
-    // 5. Build patchOps
+    // 5. Prepare patch operations
     const patchOps = [];
+
     if (!Array.isArray(existing.notes)) {
       patchOps.push({ op: 'add', path: '/notes', value: [] });
     }
+
     patchOps.push({ op: 'replace', path: '/status', value: newStatus });
 
+    // Handle closing and reopening
     if (newStatus === 'Done') {
       patchOps.push({
         op: existing.closedAt ? 'replace' : 'add',
@@ -82,7 +102,7 @@ app.http('cosmoUpdateStatus', {
       }
     });
 
-    // 6. Apply patch & re-read
+    // 6. Apply patch and re-read
     try {
       await item.patch(patchOps);
       ({ resource: existing } = await item.read());
@@ -90,7 +110,7 @@ app.http('cosmoUpdateStatus', {
       return error('Error updating status.', 500, e.message);
     }
 
-    // 7. Validate & format DTO
+    // 7. Format response DTO
     let formattedDto;
     try {
       formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -98,7 +118,7 @@ app.http('cosmoUpdateStatus', {
       return badReq;
     }
 
-    // 8. SignalR notifications
+    // 8. Notify via SignalR
     for (const url of [signalRUrl, signalRUrlStats]) {
       try {
         await fetch(url, {
@@ -110,6 +130,7 @@ app.http('cosmoUpdateStatus', {
         context.log(`⚠️ SignalR failed for ${url}:`, e.message);
       }
     }
+
     if (newStatus === 'Done' || existing.status === 'Done') {
       try {
         await fetch(signalRClosed, {

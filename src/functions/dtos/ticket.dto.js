@@ -4,7 +4,7 @@ const Joi = require('joi');
 const noteSchema = Joi.object({
   datetime: Joi.string().isoDate().required(),
   event_type: Joi.string().required(),
-  agent_email: Joi.string().email().optional(),
+  agent_email: Joi.string().optional(),
   event: Joi.string().optional(),
 });
 
