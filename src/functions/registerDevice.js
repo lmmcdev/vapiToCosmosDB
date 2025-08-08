@@ -1,41 +1,49 @@
-
 import { app } from '@azure/functions';
-import { NotificationHubsClient, createBrowserInstallation, createFcmV1Installation } from "@azure/notification-hubs";
+import {
+  NotificationHubsClient,
+  createBrowserInstallation
+} from '@azure/notification-hubs';
 
-const connectionString = process.env.NOTIFICATION_HUB_CONNECTION || 'Endpoint=sb://cservicesnotificationhubs.servicebus.windows.net/;SharedAccessKeyName=cservicespolicy;SharedAccessKey=C6s7O7HRKnBsbS4WNdjYDKvwRGnofY0mGYjFXlJl6VQ=';
-const hubName = process.env.NOTIFICATION_HUB_NAME || 'cservicesnotificationhub1';
+const connectionString =
+  process.env.NOTIFICATION_HUB_CONNECTION ||
+  'Endpoint=sb://cservicesnotificationhubs.servicebus.windows.net/;SharedAccessKeyName=cservicespolicy;SharedAccessKey=C6s7O7HRKnBsbS4WNdjYDKvwRGnofY0mGYjFXlJl6VQ=';
+
+const hubName =
+  process.env.NOTIFICATION_HUB_NAME || 'cservicesnotificationhub1';
 
 const client = new NotificationHubsClient(connectionString, hubName);
 
 app.http('registerDevice', {
   methods: ['POST'],
-  authLevel: 'anonymous', // Cambia a 'function' si quieres protección con clave
+  authLevel: 'anonymous',
   handler: async (request, context) => {
     try {
-      const body = await request.json();
+      const subscription = await request.json();
 
-      const installationId = body.installationId;
-      const pushChannel = body.pushChannel;
-      const tags = body.tags || [];
-
-      if (!installationId || !pushChannel) {
+      if (!subscription || !subscription.endpoint || !subscription.keys) {
         return {
           status: 400,
-          jsonBody: { error: 'installationId and pushChannel are required' },
+          jsonBody: { error: 'Invalid subscription object' },
         };
       }
+
+      const installationId = subscription.keys.auth; // O puedes usar otro ID persistente del usuario
+      const pushChannel = subscription.endpoint;
 
       const installation = createBrowserInstallation({
         installationId,
         pushChannel,
-        tags,
+        tags: ['all'], // Puedes luego sustituir o extender esto
+        expirationTime: null, // Opcional
+        p256dh: subscription.keys.p256dh,
+        auth: subscription.keys.auth,
       });
 
-      const result = await client.createOrUpdateInstallation(installation);
+      await client.createOrUpdateInstallation(installation);
 
       return {
         status: 200,
-        jsonBody: { message: 'Installation registered', result },
+        jsonBody: { message: 'Installation registered' },
       };
     } catch (error) {
       context.log('Error registering device:', error);
