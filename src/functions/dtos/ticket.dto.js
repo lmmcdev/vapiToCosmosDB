@@ -33,6 +33,7 @@ const ticketSchema = Joi.object({
   work_time: Joi.array().optional(),
   linked_patient_snapshot: Joi.any().optional().allow(null),
   quality_control: Joi.string().optional().allow(''),
+  patient_id: Joi.string().uuid().optional().allow(null)
 });
 
 function mapTicketToDto(ticket) {
@@ -61,6 +62,7 @@ function mapTicketToDto(ticket) {
     work_time: ticket.work_time,
     linked_patient_snapshot: ticket.linked_patient_snapshot,
     quality_control: ticket.quality_control,
+    patient_id: ticket.patient_id
   };
 }
 
