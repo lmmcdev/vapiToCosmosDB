@@ -5,7 +5,7 @@ const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 
 // 👇 NUEVO: usa tu DTO de salida ya existente (no lo modificamos)
-const { mapTicketToDto } = require('../dtos/ticket.dto');
+const { mapTicketToDto } = require('./dtos/ticket.dto');
 
 const patientsContainer = getPatientsContainer();
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
