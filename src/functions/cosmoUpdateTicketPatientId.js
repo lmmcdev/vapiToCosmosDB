@@ -1,18 +1,22 @@
+// functions/updateTicketsByPhone.js
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 
+// 👇 NUEVO: usa tu DTO de salida ya existente (no lo modificamos)
+const { mapTicketToDto } = require('../dtos/ticket.dto');
+
 const patientsContainer = getPatientsContainer();
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
-async function notifySignalR(ticket, context) {
-  context.log('🔔 Notifying SignalR:', ticket);
+async function notifySignalR(payload, context) {
+  context.log('🔔 Notifying SignalR:', payload);
   try {
     await fetch(signalRUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ticket)
+      body: JSON.stringify(payload)
     });
   } catch (e) {
     context.log('⚠️ SignalR failed:', e.message);
@@ -37,18 +41,14 @@ app.http('updateTicketsByPhone', {
       if (!['relateCurrent', 'relatePast', 'relateFuture', 'unlink'].includes(action)) {
         return badRequest('Invalid Action.');
       }
-
       if (!patient_id && action !== 'unlink') {
         return badRequest('Missing required field: patient_id');
       }
-
       if (['relateCurrent', 'unlink'].includes(action) && !ticket_id) {
         return badRequest('Missing required field: ticket_id');
       }
 
       let linked_patient_snapshot = {};
-
-      // ✅ Obtener snapshot paciente
       if (patient_id && patientsContainer) {
         try {
           const { resource: patient } = await patientsContainer.item(patient_id, patient_id).read();
@@ -66,31 +66,25 @@ app.http('updateTicketsByPhone', {
         }
       }
 
-      let updatedCount = 0;
-
       // 👉 RELATE CURRENT
       if (action === 'relateCurrent') {
         const item = container.item(ticket_id, ticket_id);
         const { resource: ticket } = await item.read();
 
         const patchOps = [];
-
         if (!ticket.patient_id) {
           patchOps.push({ op: 'add', path: '/patient_id', value: patient_id });
         } else if (ticket.patient_id !== patient_id) {
           patchOps.push({ op: 'replace', path: '/patient_id', value: patient_id });
         }
-
         if (!ticket.linked_patient_snapshot) {
           patchOps.push({ op: 'add', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
         } else {
           patchOps.push({ op: 'replace', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
         }
-
         if (!Array.isArray(ticket.notes)) {
           patchOps.push({ op: 'add', path: '/notes', value: [] });
         }
-
         patchOps.push({
           op: 'add',
           path: '/notes/-',
@@ -102,27 +96,23 @@ app.http('updateTicketsByPhone', {
           }
         });
 
-        if (patchOps.length > 0) {
-          await item.patch(patchOps);
-        }
+        if (patchOps.length > 0) await item.patch(patchOps);
 
-        // ✅ Leer ticket actualizado y enviar a SignalR
         const { resource: updatedTicket } = await item.read();
-        updatedTicket.linked_patient_snapshot = linked_patient_snapshot;
-        await notifySignalR(updatedTicket, context);
 
-        updatedCount = 1;
+        // 👇 SOLO SALIDA: mapeamos al DTO que ya usas
+        const dto = mapTicketToDto({ ...updatedTicket, linked_patient_snapshot });
 
-        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}`, { updatedTicket }, 201);
+        await notifySignalR(dto, context);
+        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}`, { updatedTicket: dto }, 201);
       }
 
       // 👉 RELATE PAST
       if (action === 'relatePast') {
-        if (!phone) {
-          return badRequest('Missing required field: phone');
-        }
+        if (!phone) return badRequest('Missing required field: phone');
 
         let continuationToken = null;
+        let updatedCount = 0;
 
         const query = {
           query: 'SELECT * FROM c WHERE c.phone = @phone',
@@ -134,26 +124,23 @@ app.http('updateTicketsByPhone', {
             .query(query, { continuationToken, maxItemCount: 100 })
             .fetchNext();
 
-          for (const ticket of resources) {
-            const item = container.item(ticket.id, ticket.id);
+          for (const t of resources) {
+            const item = container.item(t.id, t.id);
             const patchOps = [];
 
-            if (!ticket.patient_id) {
+            if (!t.patient_id) {
               patchOps.push({ op: 'add', path: '/patient_id', value: patient_id });
-            } else if (ticket.patient_id !== patient_id) {
+            } else if (t.patient_id !== patient_id) {
               patchOps.push({ op: 'replace', path: '/patient_id', value: patient_id });
             }
-
-            if (!ticket.linked_patient_snapshot) {
+            if (!t.linked_patient_snapshot) {
               patchOps.push({ op: 'add', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
             } else {
               patchOps.push({ op: 'replace', path: '/linked_patient_snapshot', value: linked_patient_snapshot });
             }
-
-            if (!Array.isArray(ticket.notes)) {
+            if (!Array.isArray(t.notes)) {
               patchOps.push({ op: 'add', path: '/notes', value: [] });
             }
-
             patchOps.push({
               op: 'add',
               path: '/notes/-',
@@ -168,7 +155,11 @@ app.http('updateTicketsByPhone', {
             if (patchOps.length > 0) {
               await item.patch(patchOps);
               const { resource: updatedTicket } = await item.read();
-              await notifySignalR(updatedTicket, context);
+
+              // 👇 SOLO SALIDA: mapeamos al DTO que ya usas
+              const dto = mapTicketToDto({ ...updatedTicket, linked_patient_snapshot });
+
+              await notifySignalR(dto, context);
               updatedCount++;
             }
           }
@@ -179,10 +170,9 @@ app.http('updateTicketsByPhone', {
         return success(`Updated ${updatedCount} ticket(s) with phone ${phone}`, { updatedCount }, 201);
       }
 
-      // 👉 RELATE FUTURE
+      // 👉 RELATE FUTURE (no devuelve ticket; no hace falta DTO)
       if (action === 'relateFuture') {
         const ruleContainer = container.database.container('phone_link_rules');
-
         const ruleId = `rule_${phone}`;
         await ruleContainer.items.upsert({
           id: ruleId,
@@ -194,9 +184,7 @@ app.http('updateTicketsByPhone', {
           created_by: agent_email
         });
 
-        // ✅ Enviar una notificación mínima a SignalR (regla)
         await notifySignalR({ type: 'future_rule', phone, patient_id }, context);
-
         return success('Future link rule saved', { phone, patient_id }, 201);
       }
 
@@ -206,19 +194,9 @@ app.http('updateTicketsByPhone', {
         const { resource: ticket } = await item.read();
 
         const patchOps = [];
-
-        if (ticket.patient_id) {
-          patchOps.push({ op: 'remove', path: '/patient_id' });
-        }
-
-        if (ticket.linked_patient_snapshot) {
-          patchOps.push({ op: 'remove', path: '/linked_patient_snapshot' });
-        }
-
-        if (!Array.isArray(ticket.notes)) {
-          patchOps.push({ op: 'add', path: '/notes', value: [] });
-        }
-
+        if (ticket.patient_id) patchOps.push({ op: 'remove', path: '/patient_id' });
+        if (ticket.linked_patient_snapshot) patchOps.push({ op: 'remove', path: '/linked_patient_snapshot' });
+        if (!Array.isArray(ticket.notes)) patchOps.push({ op: 'add', path: '/notes', value: [] });
         patchOps.push({
           op: 'add',
           path: '/notes/-',
@@ -230,24 +208,21 @@ app.http('updateTicketsByPhone', {
           }
         });
 
-        if (patchOps.length > 0) {
-          await item.patch(patchOps);
-        }
+        if (patchOps.length > 0) await item.patch(patchOps);
 
-        // ✅ Forzar lectura fresca desde Cosmos (sin usar el item en caché)
+        // Leer fresco
         const { resource: updatedTicket } = await container
           .item(ticket_id, ticket_id)
           .read({ consistencyLevel: "Strong" });
 
-        delete updatedTicket.patient_id;
-        delete updatedTicket.linked_patient_snapshot;
-        //console.log(updatedTicket)
-        await notifySignalR(updatedTicket, context);
+        // 👇 SOLO SALIDA: mapeamos al DTO que ya usas
+        const dto = mapTicketToDto(updatedTicket);
 
-        return success(`Unlinked ticket ${updatedTicket}`, { updatedTicket }, 201);
+        await notifySignalR(dto, context);
+        return success(`Unlinked ticket ${ticket_id}`, { updatedTicket: dto }, 201);
       }
 
-
+      return badRequest('Invalid Action.');
     } catch (err) {
       return error('Error', 500, err.message);
     }
