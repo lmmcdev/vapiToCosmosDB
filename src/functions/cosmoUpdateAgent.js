@@ -127,11 +127,8 @@ app.http('assignAgent', {
       }
 
       // 10) Respuesta OK
-      return success({
-        message: 'Agent assigned successfully.',
-        assigned_agent: agent_email,
-        ticket: formattedDto,
-      });
+      return success('Status updated successfully.', formattedDto);
+      
     } catch (e) {
       context.log('❌ assignAgent error:', e);
       return error('Unexpected error assigning agent.', 500, e.message);
