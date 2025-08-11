@@ -130,7 +130,7 @@ app.http('assignAgent', {
       return success({
         message: 'Agent assigned successfully.',
         assigned_agent: agent_email,
-        ticketId,
+        ticket: formattedDto,
       });
     } catch (e) {
       context.log('❌ assignAgent error:', e);
