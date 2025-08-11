@@ -1,85 +1,107 @@
+// functions/cosmoGet/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { getAgentContainer } = require('../shared/cosmoAgentClient');
-const { success, badRequest, error } = require('../shared/responseUtils');
-const { withAuth } = require('./auth/withAuth')
+const { success, error } = require('../shared/responseUtils');
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+
+DEPARTMENT = "Referrals";
+
+const {
+  ACCESS_GROUP: GROUP_CUSTOMER_SERVICE,
+  SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
+  AGENTS_GROUP: GROUP_CSERV_AGENTS,
+} = GROUPS.REFERRALS;
 
 app.http('cosmoGet', {
+  route: 'cosmoGet',
   methods: ['GET'],
   authLevel: 'anonymous',
-  handler: withAuth (async (req, context) => {
-    try {
-      const agentEmail = req.query.get('agent_assigned');
-      if (!agentEmail) return badRequest("Missing 'agent_assigned' in query.");
+  handler: withAuth(
+    async (req, context) => {
+      try {
+        const claims = context.user;
 
-      const agentContainer = getAgentContainer();
-      const ticketContainer = getContainer();
+        // 1) Email del token (para filtro en cola de agente)
+        const email = getEmailFromClaims(claims);
+        if (!email) {
+          return { status: 401, jsonBody: { error: 'Email not found in token' } };
+        }
 
-      // ✅ Buscar agente
-      const { resources: agentResult } = await agentContainer.items
-        .query({
-          query: "SELECT * FROM c WHERE c.agent_email = @agentEmail",
-          parameters: [{ name: "@agentEmail", value: agentEmail }]
-        })
-        .fetchAll();
+        // 2) Rol efectivo a partir de grupos
+        const { role, isSupervisor, isAgent } = getRoleGroups(claims, {
+          SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
+          AGENTS_GROUP: GROUP_CSERV_AGENTS,
+        });
+        if (!role) {
+          return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
+        }
 
-      if (!agentResult.length) return badRequest("Agent not found.");
+        const container = getContainer();
 
-      const { agent_department, agent_rol, agent_extension } = agentResult[0];
+        // 3) Query según rol
+        let query, parameters;
 
-      let query, parameters;
+        if (role === 'supervisor') {
+          console.log("Supervisor query")
+          // Supervisor: todos los tickets del departamento (excepto "done")
+          query = `
+            SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
+                   c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
+                   c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
+                   c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
+                   c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt,
+                   c.patient_id, c.linked_patient_snapshot
+            FROM c
+            WHERE c.assigned_department = @department
+              AND LOWER(c.status) != "done"
+          `;
+          parameters = [{ name: "@department", value: DEPARTMENT }];
+        } else {
+          console.log("Agent query")
+          // Agente: su cola + no asignados del departamento (excepto "done")
+          query = `
+            SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
+                   c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
+                   c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
+                   c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
+                   c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt,
+                   c.patient_id, c.linked_patient_snapshot
+            FROM c
+            WHERE (
+                  c.agent_assigned = @agentEmail
+               OR (c.agent_assigned = "" AND c.assigned_department = @department)
+                  )
+              AND LOWER(c.status) != "done"
+          `;
+          parameters = [
+            { name: "@agentEmail", value: email },
+            { name: "@department", value: DEPARTMENT }
+          ];
+        }
 
-      if (agent_rol === "Supervisor") {
-        query = `
-          SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
-                 c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
-                 c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
-                 c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
-                 c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt,
-                 c.patient_id, c.linked_patient_snapshot
-          FROM c
-          WHERE c.assigned_department = @department
-            AND LOWER(c.status) != "done"
-        `;
-        parameters = [
-          { name: "@department", value: agent_department }
-        ];
-      } else {
-        query = `
-          SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,
-                 c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
-                 c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
-                 c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
-                 c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt,
-                 c.patient_id, c.linked_patient_snapshot
-          FROM c
-          WHERE (
-                  (c.agent_assigned = @agentEmail OR c.agent_extension = @agent_extension)
-                  OR (c.agent_assigned = "" AND c.assigned_department = @department)
-                )
-            AND LOWER(c.status) != "done"
-        `;
-        parameters = [
-          { name: "@agentEmail", value: agentEmail },
-          { name: "@department", value: agent_department },
-          { name: "@agent_extension", value: agent_extension }
-        ];
+        const { resources } = await container.items
+          .query({ query, parameters })
+          .fetchAll();
+
+        const final = resources.map(t => ({
+          ...t,
+          linked_patient_snapshot: t.linked_patient_snapshot || {}
+        }));
+
+        return success(final);
+      } catch (err) {
+        context.log('❌ Error en cosmoGet:', err);
+        return error('Error al consultar tickets', err);
       }
-
-      const { resources: tickets } = await ticketContainer.items
-        .query({ query, parameters })
-        .fetchAll();
-
-      // ✅ Devolver linked_patient_snapshot siempre presente
-      const finalTickets = tickets.map(ticket => ({
-        ...ticket,
-        linked_patient_snapshot: ticket.linked_patient_snapshot || {}
-      }));
-
-      return success(finalTickets);
-    } catch (err) {
-      context.log('❌ Error al consultar tickets:', err);
-      return error('Error al consultar tickets', err);
+    },
+    {
+      // Reforzamos que el token tenga el scope correcto
+      scopesAny: ['access_as_user'],
+      // Puerta de entrada al módulo: debe pertenecer al grupo del módulo
+      groupsAny: [GROUP_CUSTOMER_SERVICE],
+      // No exigimos "rolesAny" aquí; el rol se resuelve DINÁMICAMENTE por grupos en el handler
     }
-  })
+  )
 });
