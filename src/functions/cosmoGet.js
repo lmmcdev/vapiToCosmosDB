@@ -59,7 +59,6 @@ app.http('cosmoGet', {
           `;
           parameters = [{ name: "@department", value: DEPARTMENT }];
         } else {
-          console.log("Agent query")
           // Agente: su cola + no asignados del departamento (excepto "done")
           query = `
             SELECT c.id, c.summary, c.call_reason, c.creation_date, c.patient_name,

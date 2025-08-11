@@ -1,99 +1,146 @@
-// src/functions/assignAgent/index.js
+// src/functions/assignAgent/index.js (CommonJS)
 const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+
+// DTO de entrada
+const { assignAgentInput } = require('./dtos/input.schema');
+
+const DEPARTMENT = 'Referrals';
+
+const {
+  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS
+  //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+} = GROUPS.REFERRALS;
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('assignAgent', {
+  route: 'assignAgent',
   methods: ['PATCH'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
-    // 1. Parse request
-    let ticketId, agent_email;
+  handler: withAuth(async (request, context) => {
     try {
-      ({ tickets: ticketId, agent_email } = await request.json());
-    } catch {
-      return badRequest('Invalid JSON');
-    }
-    if (!ticketId || !agent_email) {
-      return badRequest('Your request must include: tickets, agent_email');
-    }
+      const claims = context.user;
 
-    // 2. Read ticket
-    const container = getContainer();
-    const item = container.item(ticketId, ticketId);
-    let existing;
-    try {
-      ({ resource: existing } = await item.read());
-    } catch (e) {
-      return error('Error reading ticket.', 500, e.message);
-    }
-    if (!existing) return badRequest('Ticket not found.');
-
-    // 3. Fetch target agent and validate department
-    const agentQ = {
-      query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
-      parameters: [{ name: '@agent_email', value: agent_email }]
-    };
-    const { resources: agents } = await getAgentContainer().items.query(agentQ).fetchAll();
-    if (!agents.length) return badRequest(`Target agent not found (${agent_email})`);
-    const targetAgent = agents[0];
-    if (existing.assigned_department && targetAgent.agent_department !== existing.assigned_department) {
-      return badRequest(
-        `Agent's department (${targetAgent.agent_department}) does not match ticket's assigned department (${existing.assigned_department}).`
-      );
-    }
-
-    // 4. Build patch operations
-    const patchOps = [
-      { op: 'replace', path: '/agent_assigned', value: agent_email }
-    ];
-    if (!Array.isArray(existing.notes)) {
-      patchOps.push({ op: 'add', path: '/notes', value: [] });
-    }
-    patchOps.push({
-      op: 'add',
-      path: '/notes/-',
-      value: {
-        datetime: new Date().toISOString(),
-        event_type: 'system_log',
-        agent_email,
-        event: `Assigned agent to the ticket: ${agent_email}`
+      // 1) Email del token (agente que hace la asignación)
+      const agent_email = getEmailFromClaims(claims);
+      if (!agent_email) {
+        return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
-    });
 
-    // 5. Apply patch and read updated
-    try {
-      await item.patch(patchOps);
-      ({ resource: existing } = await item.read());
-    } catch (e) {
-      return error('Error assigning agent.', 500, e.message);
-    }
+      // 2) Rol efectivo según grupos (agent o supervisor)
+      const { role } = getRoleGroups(claims, {
+        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+        //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+      });
+      if (!role) {
+        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
+      }
 
-    // 6. Validate & format via DTO helper
-    let formattedDto;
-    try {
-      formattedDto = validateAndFormatTicket(existing, badRequest, context);
-    } catch (badReq) {
-      return badReq;
-    }
+      // 3) Parse + valida body con DTO (ticketId requerido)
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return badRequest('Invalid JSON');
+      }
 
-    // 7. SignalR notification
-    try {
-      await fetch(signalRUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formattedDto)
+      const { error: dtoErr, value } = assignAgentInput.validate(body, { abortEarly: false });
+      if (dtoErr) {
+        const details = dtoErr.details?.map(d => d.message).join('; ') || 'Validation error';
+        return badRequest(details);
+      }
+      const { tickets: ticketId, target_agent_email } = value;
+
+      // 4) Lee el ticket
+      const container = getContainer();
+      const item = container.item(ticketId, ticketId);
+      let existing;
+      try {
+        ({ resource: existing } = await item.read());
+      } catch (e) {
+        return error('Error reading ticket.', 500, e.message);
+      }
+      if (!existing) return badRequest('Ticket not found.');
+
+      // (Opcional) 5) Garantiza que el ticket pertenece al módulo/dep
+      if (existing.assigned_department && existing.assigned_department !== DEPARTMENT) {
+        return badRequest(
+          `Ticket department (${existing.assigned_department}) does not match endpoint department (${DEPARTMENT}).`
+        );
+      }
+
+      // 6) Build patch: asigna el agente del json y agrega nota
+      const patchOps = [
+        { op: 'replace', path: '/agent_assigned', value: target_agent_email },
+      ];
+
+      if (!Array.isArray(existing.notes)) {
+        patchOps.push({ op: 'add', path: '/notes', value: [] });
+      }
+      patchOps.push({
+        op: 'add',
+        path: '/notes/-',
+        value: {
+          datetime: new Date().toISOString(),
+          event_type: 'system_log',
+          agent_email,
+          event: `Assigned agent to the ticket: ${target_agent_email}`,
+        },
+      });
+
+      // 7) Aplica patch y relee
+      try {
+        await item.patch(patchOps);
+        ({ resource: existing } = await item.read());
+      } catch (e) {
+        return error('Error assigning agent.', 500, e.message);
+      }
+
+      // 8) Formatea salida con tu helper DTO
+      let formattedDto;
+      try {
+        formattedDto = validateAndFormatTicket(existing, badRequest, context);
+      } catch (badReq) {
+        return badReq;
+      }
+
+      // 9) Notifica SignalR (best-effort)
+      if (signalRUrl) {
+        try {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formattedDto),
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR failed:', e.message);
+        }
+      }
+
+      // 10) Respuesta OK
+      return success({
+        message: 'Agent assigned successfully.',
+        assigned_agent: agent_email,
+        ticketId,
       });
     } catch (e) {
-      context.log('⚠️ SignalR failed:', e.message);
+      context.log('❌ assignAgent error:', e);
+      return error('Unexpected error assigning agent.', 500, e.message);
     }
-
-    // 8. Return success
-    return success('Agent assigned successfully.', { assigned_agent: agent_email });
-  }
+  }, {
+    // Reforzamos que el token tenga el scope correcto
+    scopesAny: ['access_as_user'],
+    // Puerta de entrada al módulo: debe pertenecer al grupo de acceso del módulo
+    groupsAny: [GROUP_REFERRALS_ACCESS],
+    // No exigimos roles aquí; los resolvemos dinámicamente arriba
+  })
 });

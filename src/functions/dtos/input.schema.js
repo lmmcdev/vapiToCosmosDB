@@ -5,8 +5,8 @@ const ALLOWED_STATUSES = ['New', 'In Progress', 'Pending', 'Done', 'Blocked'];
 
 // 🟩 Esquema: Asignación de agente
 const assignAgentInput = Joi.object({
-  ticketId: Joi.string().uuid().required().label('ticketId'),
-  agent_email: Joi.string().email().required().label('agent_email'),
+  tickets: Joi.string().uuid().required().label('ticketId'),
+  //agent_email: Joi.string().email().required().label('agent_email'),
   target_agent_email: Joi.string().email().required().label('target_agent_email')
 });
 
