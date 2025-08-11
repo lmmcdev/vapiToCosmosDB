@@ -2,11 +2,12 @@ const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
+const { withAuth } = require('./auth/withAuth')
 
 app.http('cosmoGet', {
   methods: ['GET'],
   authLevel: 'anonymous',
-  handler: async (req, context) => {
+  handler: withAuth (async (req, context) => {
     try {
       const agentEmail = req.query.get('agent_assigned');
       if (!agentEmail) return badRequest("Missing 'agent_assigned' in query.");
@@ -80,5 +81,5 @@ app.http('cosmoGet', {
       context.log('❌ Error al consultar tickets:', err);
       return error('Error al consultar tickets', err);
     }
-  }
+  })
 });
