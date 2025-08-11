@@ -1,149 +1,185 @@
-// src/functions/cosmoUpdateStatus/index.js
+// src/functions/cosmoUpdateStatus/index.js (CommonJS)
 const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
 
 const { getContainer } = require('../shared/cosmoClient');
-const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updateTicketStatusInput } = require('./dtos/input.schema');
 
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+
+const DEPARTMENT = 'Referrals';
+
+const {
+  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
+} = GROUPS.REFERRALS;
+
 const signalRUrl      = process.env.SIGNAL_BROADCAST_URL2;
-const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
+theStatusUrl = process.env.SIGNAL_BROADCAST_URL3;
 const signalRClosed   = process.env.SIGNAL_BROADCAST_URL4;
 
 app.http('cosmoUpdateStatus', {
+  route: 'cosmoUpdateStatus',
   methods: ['PATCH'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
-    // 1. Parse and validate input
-    let input;
+  handler: withAuth(async (request, context) => {
     try {
-      const body = await request.json();
-      const { error: validationError, value } = updateTicketStatusInput.validate(body, { abortEarly: false });
-      if (validationError) {
-        context.log('Validation failed:', validationError.details);
-        return badRequest('Invalid input.', validationError.details);
+      // 1) Actor desde el token
+      const claims = context.user;
+      const actor_email = getEmailFromClaims(claims);
+      if (!actor_email) {
+        return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
-      input = value;
-    } catch {
-      return badRequest('Invalid JSON.');
-    }
 
-    const { ticketId, newStatus, agent_email } = input;
-
-    // 2. Read ticket
-    const item = getContainer().item(ticketId, ticketId);
-    let existing;
-    try {
-      ({ resource: existing } = await item.read());
-    } catch (e) {
-      return error('Error reading ticket.', 500, e.message);
-    }
-    if (!existing) return notFound('Ticket not found.');
-
-    // 3. Authorization check
-    let agentInfo;
-    try {
-      const { resources } = await getAgentContainer().items
-        .query({
-          query: 'SELECT * FROM c WHERE c.agent_email=@agent_email',
-          parameters: [{ name: '@agent_email', value: agent_email }]
-        })
-        .fetchAll();
-      if (!resources.length) return badRequest('Agent not found.');
-      agentInfo = resources[0];
-    } catch (e) {
-      return error('Error querying agent information.', 500, e.message);
-    }
-
-    const isAllowed =
-      existing.agent_assigned === agent_email ||
-      (Array.isArray(existing.collaborators) && existing.collaborators.includes(agent_email)) ||
-      agentInfo.agent_rol === 'Supervisor';
-
-    if (!isAllowed) {
-      return badRequest(`You do not have permission to change this ticket's status.`);
-    }
-
-    // 4. Prevent duplicate status
-    if (existing.status === newStatus) {
-      return badRequest('New status is the same as current.');
-    }
-
-    // 5. Prepare patch operations
-    const patchOps = [];
-
-    if (!Array.isArray(existing.notes)) {
-      patchOps.push({ op: 'add', path: '/notes', value: [] });
-    }
-
-    patchOps.push({ op: 'replace', path: '/status', value: newStatus });
-
-    // Handle closing and reopening
-    if (newStatus === 'Done') {
-      patchOps.push({
-        op: existing.closedAt ? 'replace' : 'add',
-        path: '/closedAt',
-        value: new Date().toISOString()
+      // 2) Rol efectivo (supervisor/agent) por grupos
+      const { role } = getRoleGroups(claims, {
+        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
       });
-    } else if (existing.status === 'Done' && existing.closedAt) {
-      patchOps.push({ op: 'replace', path: '/closedAt', value: null });
-    }
-
-    patchOps.push({
-      op: 'add',
-      path: '/notes/-',
-      value: {
-        datetime: new Date().toISOString(),
-        event_type: 'system_log',
-        agent_email,
-        event: `Status changed: "${existing.status}" → "${newStatus}"`
+      if (!role) {
+        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
       }
-    });
 
-    // 6. Apply patch and re-read
-    try {
-      await item.patch(patchOps);
-      ({ resource: existing } = await item.read());
+      // 3) Parse + valida body con DTO (rol en el contexto para permitir/denegar "Done")
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return badRequest('Invalid JSON.');
+      }
+
+      const { error: vErr, value } = updateTicketStatusInput.validate(body, {
+        abortEarly: false,
+        stripUnknown: true,
+        context: { role }, // 👈 habilita/inhabilita "Done" según rol
+      });
+      if (vErr) {
+        const details = vErr.details?.map(d => d.message).join('; ') || 'Invalid input.';
+        return badRequest(details);
+      }
+
+      const { ticketId, newStatus } = value;
+
+      // 4) Leer ticket
+      const item = getContainer().item(ticketId, ticketId);
+      let existing;
+      try {
+        ({ resource: existing } = await item.read());
+      } catch (e) {
+        return error('Error reading ticket.', 500, e.message);
+      }
+      if (!existing) return notFound('Ticket not found.');
+
+      // (Opcional) 5) Verificar departamento
+      if (existing.assigned_department && existing.assigned_department !== DEPARTMENT) {
+        return badRequest(
+          `Ticket department (${existing.assigned_department}) does not match endpoint department (${DEPARTMENT}).`
+        );
+      }
+
+      // 6) Autorización: asignado, colaborador o supervisor
+      const lc = (s) => (s || '').toLowerCase();
+      const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
+      const isCollaborator = Array.isArray(existing.collaborators)
+        && existing.collaborators.map(lc).includes(lc(actor_email));
+      const isSupervisor = role === 'supervisor';
+
+      if (!isAssigned && !isCollaborator && !isSupervisor) {
+        return badRequest(`You do not have permission to change this ticket's status.`);
+      }
+
+      // 7) Evitar estado duplicado
+      if ((existing.status || '') === newStatus) {
+        return badRequest('New status is the same as current.');
+      }
+
+      // 8) Patch ops
+      const patchOps = [];
+
+      if (!Array.isArray(existing.notes)) {
+        patchOps.push({ op: 'add', path: '/notes', value: [] });
+      }
+
+      patchOps.push({ op: 'replace', path: '/status', value: newStatus });
+
+      // Manejo de cierre / reapertura
+      if (newStatus === 'Done') {
+        patchOps.push({
+          op: existing.closedAt ? 'replace' : 'add',
+          path: '/closedAt',
+          value: new Date().toISOString(),
+        });
+      } else if (existing.status === 'Done' && existing.closedAt) {
+        patchOps.push({ op: 'replace', path: '/closedAt', value: null });
+      }
+
+      patchOps.push({
+        op: 'add',
+        path: '/notes/-',
+        value: {
+          datetime: new Date().toISOString(),
+          event_type: 'system_log',
+          agent_email: actor_email,
+          event: `Status changed: "${existing.status}" → "${newStatus}"`,
+        },
+      });
+
+      // 9) Aplicar patch y releer
+      try {
+        await item.patch(patchOps);
+        ({ resource: existing } = await item.read());
+      } catch (e) {
+        return error('Error updating status.', 500, e.message);
+      }
+
+      // 10) Formatear salida
+      let formattedDto;
+      try {
+        formattedDto = validateAndFormatTicket(existing, badRequest, context);
+      } catch (badReq) {
+        return badReq;
+      }
+
+      // 11) Notificar SignalR (best-effort)
+      const notifyUrls = [signalRUrl, theStatusUrl].filter(Boolean);
+      for (const url of notifyUrls) {
+        try {
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formattedDto),
+          });
+        } catch (e) {
+          context.log(`⚠️ SignalR failed for ${url}:`, e.message);
+        }
+      }
+
+      if ((existing.status === 'Done' || newStatus === 'Done') && signalRClosed) {
+        try {
+          await fetch(signalRClosed, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formattedDto),
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR closedTickets failed:', e.message);
+        }
+      }
+
+      // 12) Responder (ticket completo)
+      return success('Operation successfull', formattedDto);
     } catch (e) {
-      return error('Error updating status.', 500, e.message);
+      context.log('❌ cosmoUpdateStatus error:', e);
+      return error('Unexpected error updating status.', 500, e.message);
     }
-
-    // 7. Format response DTO
-    let formattedDto;
-    try {
-      formattedDto = validateAndFormatTicket(existing, badRequest, context);
-    } catch (badReq) {
-      return badReq;
-    }
-
-    // 8. Notify via SignalR
-    for (const url of [signalRUrl, signalRUrlStats]) {
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formattedDto)
-        });
-      } catch (e) {
-        context.log(`⚠️ SignalR failed for ${url}:`, e.message);
-      }
-    }
-
-    if (newStatus === 'Done' || existing.status === 'Done') {
-      try {
-        await fetch(signalRClosed, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formattedDto)
-        });
-      } catch (e) {
-        context.log('⚠️ SignalR closedTickets failed:', e.message);
-      }
-    }
-
-    // 9. Return response
-    return success('Status updated successfully.', formattedDto);
-  }
+  }, {
+    // Auth: scope + grupo de acceso del módulo
+    scopesAny: ['access_as_user'],
+    groupsAny: [GROUP_REFERRALS_ACCESS],
+  })
 });

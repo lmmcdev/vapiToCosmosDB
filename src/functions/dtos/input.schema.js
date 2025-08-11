@@ -1,7 +1,9 @@
 const Joi = require('joi');
 
 // 🟢 Lista de estados válidos para el ticket
-const ALLOWED_STATUSES = ['In Progress', 'Pending', 'Done', 'Emergency']; //agregar Duplicated dejarlo asi ahora para pruebas
+const BASE_STATUSES = ['In Progress', 'Pending', 'Emergency'];
+const SUPERVISOR_STATUSES = [...BASE_STATUSES, 'Done'];
+
 
 // 🟩 Esquema: Asignación de agente
 const assignAgentInput = Joi.object({
@@ -26,10 +28,11 @@ const updatePatientNameInput = Joi.object({
 // 🟥 Esquema: Cambio de estado del ticket
 const updateTicketStatusInput = Joi.object({
   ticketId: Joi.string().uuid().required().label('ticketId'),
-  newStatus: Joi.string()
-    .valid(...ALLOWED_STATUSES)
-    .required()
-    .label('newStatus'),
+  newStatus: Joi.alternatives().conditional('$role', {
+    is: 'supervisor',
+    then: Joi.string().valid(...SUPERVISOR_STATUSES).required(),
+    otherwise: Joi.string().valid(...BASE_STATUSES).required(),
+  }).label('newStatus'),
 });
 
 //update ticket notes
@@ -106,5 +109,5 @@ module.exports = {
   updatePatientDOBInput,
   updatePatientPhoneInput,
   updateTicketDepartmentInput,
-  ALLOWED_STATUSES
+  BASE_STATUSES, SUPERVISOR_STATUSES
 };
