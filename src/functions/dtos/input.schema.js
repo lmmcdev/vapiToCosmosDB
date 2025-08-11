@@ -1,7 +1,7 @@
 const Joi = require('joi');
 
 // 🟢 Lista de estados válidos para el ticket
-const ALLOWED_STATUSES = ['New', 'In Progress', 'Pending', 'Done', 'Blocked'];
+const ALLOWED_STATUSES = ['In Progress', 'Pending', 'Done', 'Emergency']; //agregar Duplicated dejarlo asi ahora para pruebas
 
 // 🟩 Esquema: Asignación de agente
 const assignAgentInput = Joi.object({
@@ -13,7 +13,6 @@ const assignAgentInput = Joi.object({
 // 🟨 Esquema: Registro de tiempo de trabajo
 const updateWorkTimeInput = Joi.object({
   tickets: Joi.string().uuid().required().label('ticketId'),
-  agent_email: Joi.string().email().required().label('agent_email'),
   workTime: Joi.number().min(0).required().label('workTime'),
   currentStatus: Joi.string().min(2).max(100).required().label('currentStatus')
 });
@@ -21,7 +20,6 @@ const updateWorkTimeInput = Joi.object({
 // 🟦 Esquema: Actualización de nombre del paciente
 const updatePatientNameInput = Joi.object({
   tickets: Joi.string().uuid().required().label('ticketId'),
-  agent_email: Joi.string().email().required().label('agent_email'),
   nuevo_nombreapellido: Joi.string().min(3).max(100).required().label('nuevo_nombreapellido')
 });
 
@@ -32,13 +30,12 @@ const updateTicketStatusInput = Joi.object({
     .valid(...ALLOWED_STATUSES)
     .required()
     .label('newStatus'),
-  agent_email: Joi.string().email().required().label('agent_email')
 });
 
 //update ticket notes
 const updateTicketNotesInput = Joi.object({
   ticketId: Joi.string().uuid().required().label('ticketId'),
-  agent_email: Joi.string().email().required().label('agent_email'),
+  //agent_email: Joi.string().email().required().label('agent_email'),
 
   notes: Joi.array()
     .items(
@@ -69,7 +66,7 @@ const updateTicketNotesInput = Joi.object({
 // 🟨 Esquema: Actualización de fecha de nacimiento del paciente
 const updatePatientDOBInput = Joi.object({
   tickets: Joi.string().uuid().required().label('tickets'),
-  agent_email: Joi.string().email().required().label('agent_email'),
+  //agent_email: Joi.string().email().required().label('agent_email'),
   nueva_fechanacimiento: Joi.string()
     .pattern(/^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/)
     .required()
@@ -83,7 +80,7 @@ const updatePatientDOBInput = Joi.object({
 // 🟪 Esquema: Actualización del teléfono del paciente
 const updatePatientPhoneInput = Joi.object({
   tickets: Joi.string().uuid().required().label('tickets'),
-  agent_email: Joi.string().email().required().label('agent_email'),
+  //agent_email: Joi.string().email().required().label('agent_email'),
   new_phone: Joi.string()
     .pattern(/^(\+1\s?)?(\([2-9][0-9]{2}\)|[2-9][0-9]{2})[\s.-]?[0-9]{3}[\s.-]?[0-9]{4}$/)
     .required()
@@ -98,7 +95,7 @@ const updatePatientPhoneInput = Joi.object({
 const updateTicketDepartmentInput = Joi.object({
   tickets: Joi.string().uuid().required().label('tickets'),
   newDepartment: Joi.string().min(2).max(100).required().label('newDepartment'),
-  agent_email: Joi.string().email().required().label('agent_email')
+  //agent_email: Joi.string().email().required().label('agent_email')
 });
 
 
