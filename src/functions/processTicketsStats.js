@@ -147,30 +147,30 @@ app.timer('processTicketStats', {
       if (DailyStatsOutput) {
         const { error: dtoErr } = DailyStatsOutput.validate(statDoc, { abortEarly: false });
         if (dtoErr) {
-          context.log.error('❌ Stats DTO validation failed:', dtoErr.details);
+          context.log.error('Stats DTO validation failed:', dtoErr.details);
         }
       }
 
       // 7) Upsert en Cosmos
       await statsContainer.items.upsert(statDoc);
-      context.log('✅ Stats upserted to Cosmos successfully');
+      context.log('Stats upserted to Cosmos successfully');
 
       // 8) Broadcast por SignalR (best-effort)
       if (signalrDailyStats) {
         try {
-          context.log(`📡 Sending SignalR to ${signalrDailyStats}`);
+          context.log(`Sending SignalR to ${signalrDailyStats}`);
           const resp = await fetch(signalrDailyStats, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(statDoc),
           });
-          context.log(`📡 SignalR response: ${resp.status}`);
+          context.log(`SignalR response: ${resp.status}`);
         } catch (e) {
-          context.log(`⚠️ SignalR failed: ${e.message}`);
+          context.log(`SignalR failed: ${e.message}`);
         }
       }
     } catch (err) {
-      context.log.error('❌ Error processing stats:', err?.message || err);
+      context.log.error('Error processing stats:', err?.message || err);
     }
   },
 });
