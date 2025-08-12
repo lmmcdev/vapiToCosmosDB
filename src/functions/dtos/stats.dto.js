@@ -1,12 +1,9 @@
+// ./dtos/stats.dto.js
 const Joi = require('joi');
 
 const ALLOWED_STATUSES = ['New', 'In Progress', 'Done', 'Emergency', 'Pending', 'Duplicated'];
 
-// ===== DTO de salida (embebido) =====
-const DailyStatsOutput = Joi.object({
-  id: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
-  date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
-
+const CommonStatsBase = {
   agentStats: Joi.array().items(
     Joi.object({
       agentEmail: Joi.alternatives().try(
@@ -23,17 +20,9 @@ const DailyStatsOutput = Joi.object({
     resolvedCount: Joi.number().integer().min(0).required(),
   }).required(),
 
-  hourlyBreakdown: Joi.array().items(
-    Joi.object({
-      hour: Joi.number().integer().min(0).max(23).required(),
-      count: Joi.number().integer().min(0).required(),
-    })
-  ).required(),
-
-  // Conteo por estado del ticket
   statusCounts: Joi.object(
     Object.fromEntries(ALLOWED_STATUSES.map(s => [s, Joi.number().integer().min(0).required()]))
-  ).required(),
+  ).optional(),
 
   aiClassificationStats: Joi.object({
     priority: Joi.object().pattern(
@@ -58,4 +47,42 @@ const DailyStatsOutput = Joi.object({
       })
     ).required(),
   }).required(),
-});
+};
+
+// ===== Daily: hourlyBreakdown =====
+const DailyStatsOutput = Joi.object({
+  id: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+  date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+
+  hourlyBreakdown: Joi.array().items(
+    Joi.object({
+      hour: Joi.number().integer().min(0).max(23).required(),
+      count: Joi.number().integer().min(0).required(),
+    })
+  ).required(),
+
+  ...CommonStatsBase,
+})
+  .unknown(true)
+  .prefs({ allowUnknown: true, stripUnknown: true });
+
+// ===== Monthly: dailyBreakdown =====
+const MonthlyStatsOutput = Joi.object({
+  // IDs típicos: "month-YYYY-MM" o "month-YYYY-MM-final"
+  id: Joi.string().pattern(/^month-\d{4}-\d{2}(-final)?$/).required(),
+  // fecha de generación (YYYY-MM-DD)
+  date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+
+  dailyBreakdown: Joi.array().items(
+    Joi.object({
+      date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+      count: Joi.number().integer().min(0).required(),
+    })
+  ).required(),
+
+  ...CommonStatsBase,
+})
+  .unknown(true)
+  .prefs({ allowUnknown: true, stripUnknown: true });
+
+module.exports = { DailyStatsOutput, MonthlyStatsOutput };
