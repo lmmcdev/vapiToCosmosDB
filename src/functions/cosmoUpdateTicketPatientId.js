@@ -1,18 +1,33 @@
+// src/functions/updateTicketsByPhone/index.js (CommonJS)
+const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+
 const { getContainer } = require('../shared/cosmoClient');
 const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
+const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+
+// 🔐 Auth utils
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+
+const {
+  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
+} = GROUPS.REFERRALS;
 
 const patientsContainer = getPatientsContainer();
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
-async function notifySignalR(ticket, context) {
-  context.log('🔔 Notifying SignalR:', ticket);
+async function notifySignalR(payload, context) {
+  if (!signalRUrl) return;
   try {
     await fetch(signalRUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ticket)
+      body: JSON.stringify(payload),
     });
   } catch (e) {
     context.log('⚠️ SignalR failed:', e.message);
@@ -20,45 +35,71 @@ async function notifySignalR(ticket, context) {
 }
 
 app.http('updateTicketsByPhone', {
+  route: 'updateTicketsByPhone',
   methods: ['POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(async (request, context) => {
     try {
+      // 1) Actor desde el token
+      const claims = context.user;
+      const actor_email = getEmailFromClaims(claims);
+      if (!actor_email) {
+        return { status: 401, jsonBody: { error: 'Email not found in token' } };
+      }
+
+      // 2) Rol efectivo (supervisor/agent) a partir de grupos
+      const { role, isSupervisor, isAgent } = getRoleGroups(claims, {
+        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+      });
+      if (!role) {
+        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
+      }
+
+      // 3) Parse entrada básica
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return badRequest('Invalid JSON payload.');
+      }
+
       const {
         action = 'relatePast',
         ticket_id,
         phone,
         patient_id,
-        agent_email = 'system@update'
-      } = await request.json();
+      } = body; // agent_email se toma del token
 
       const container = getContainer();
 
-      if (!['relateCurrent', 'relatePast', 'relateFuture', 'unlink'].includes(action)) {
+      // 4) Validaciones de negocio
+      const allowed = ['relateCurrent', 'relatePast', 'relateFuture', 'unlink'];
+      if (!allowed.includes(action)) {
         return badRequest('Invalid Action.');
       }
-
       if (!patient_id && action !== 'unlink') {
         return badRequest('Missing required field: patient_id');
       }
-
       if (['relateCurrent', 'unlink'].includes(action) && !ticket_id) {
         return badRequest('Missing required field: ticket_id');
       }
+      if (action === 'relatePast' && !phone) {
+        return badRequest('Missing required field: phone');
+      }
 
+      // 5) Obtener snapshot paciente (best-effort)
       let linked_patient_snapshot = {};
-
-      // ✅ Obtener snapshot paciente
       if (patient_id && patientsContainer) {
         try {
           const { resource: patient } = await patientsContainer.item(patient_id, patient_id).read();
           if (patient) {
             linked_patient_snapshot = {
               id: patient.id,
-              Name: patient.Name || "",
-              DOB: patient.DOB || "",
-              Address: patient.Address || "",
-              Location: patient.Location || ""
+              Name: patient.Name || '',
+              DOB: patient.DOB || '',
+              Address: patient.Address || '',
+              Location: patient.Location || '',
             };
           }
         } catch (err) {
@@ -66,15 +107,28 @@ app.http('updateTicketsByPhone', {
         }
       }
 
-      let updatedCount = 0;
+      // Helpers comunes
+      const lc = (s) => (s || '').toLowerCase();
 
-      // 👉 RELATE CURRENT
+      // ====== ACTION: relateCurrent ======
       if (action === 'relateCurrent') {
+        // Lee ticket
         const item = container.item(ticket_id, ticket_id);
-        const { resource: ticket } = await item.read();
+        const { resource: ticket } = await item.read().catch((e) => {
+          throw { _msg: 'Error reading ticket.', err: e };
+        });
+        if (!ticket) return badRequest('Ticket not found.');
+
+        // Permisos: asignado / colaborador / supervisor
+        const isAssigned = lc(ticket.agent_assigned) === lc(actor_email);
+        const isCollaborator = Array.isArray(ticket.collaborators)
+          && ticket.collaborators.map(lc).includes(lc(actor_email));
+
+        if (!isSupervisor && !isAssigned && !isCollaborator) {
+          return { status: 403, jsonBody: { error: 'Insufficient permission for relateCurrent.' } };
+        }
 
         const patchOps = [];
-
         if (!ticket.patient_id) {
           patchOps.push({ op: 'add', path: '/patient_id', value: patient_id });
         } else if (ticket.patient_id !== patient_id) {
@@ -97,36 +151,41 @@ app.http('updateTicketsByPhone', {
           value: {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
-            agent_email,
-            event: `Linked this ticket to patient_id: ${patient_id}`
-          }
+            agent_email: actor_email,
+            event: `Linked this ticket to patient_id: ${patient_id}`,
+          },
         });
 
         if (patchOps.length > 0) {
-          await item.patch(patchOps);
+          await item.patch(patchOps).catch((e) => {
+            throw { _msg: 'Error patching ticket.', err: e };
+          });
         }
 
-        // ✅ Leer ticket actualizado y enviar a SignalR
+        // Leer actualizado
         const { resource: updatedTicket } = await item.read();
-        updatedTicket.linked_patient_snapshot = linked_patient_snapshot;
-        await notifySignalR(updatedTicket, context);
+        // DTO de salida uniforme
+        const dto = validateAndFormatTicket(updatedTicket, badRequest, context);
 
-        updatedCount = 1;
+        // Notificar (best-effort)
+        //await notifySignalR(dto, context);
 
-        return success(`Linked ticket ${ticket_id} to patient_id ${patient_id}`, { updatedTicket }, 201);
+        return success('Operation successfull', dto, 201);
       }
 
-      // 👉 RELATE PAST
+      // ====== ACTION: relatePast (bulk) ======
       if (action === 'relatePast') {
-        if (!phone) {
-          return badRequest('Missing required field: phone');
+        // Seguridad: solo supervisores
+        if (!isSupervisor) {
+          return { status: 403, jsonBody: { error: 'Only supervisors can run relatePast.' } };
         }
 
+        let updatedCount = 0;
         let continuationToken = null;
 
         const query = {
           query: 'SELECT * FROM c WHERE c.phone = @phone',
-          parameters: [{ name: '@phone', value: phone }]
+          parameters: [{ name: '@phone', value: phone }],
         };
 
         do {
@@ -160,15 +219,13 @@ app.http('updateTicketsByPhone', {
               value: {
                 datetime: new Date().toISOString(),
                 event_type: 'system_log',
-                agent_email,
-                event: `Linked ticket to patient_id: ${patient_id}`
-              }
+                agent_email: actor_email,
+                event: `Linked ticket to patient_id: ${patient_id}`,
+              },
             });
 
             if (patchOps.length > 0) {
               await item.patch(patchOps);
-              const { resource: updatedTicket } = await item.read();
-              await notifySignalR(updatedTicket, context);
               updatedCount++;
             }
           }
@@ -176,13 +233,17 @@ app.http('updateTicketsByPhone', {
           continuationToken = token;
         } while (continuationToken);
 
-        return success(`Updated ${updatedCount} ticket(s) with phone ${phone}`, { updatedCount }, 201);
+        return success(`Operation successfull`, { updatedCount }, 201);
       }
 
-      // 👉 RELATE FUTURE
+      // ====== ACTION: relateFuture (regla para futuros tickets) ======
       if (action === 'relateFuture') {
-        const ruleContainer = container.database.container('phone_link_rules');
+        // Seguridad: solo supervisores
+        if (!isSupervisor) {
+          return { status: 403, jsonBody: { error: 'Only supervisors can create future link rules.' } };
+        }
 
+        const ruleContainer = container.database.container('phone_link_rules');
         const ruleId = `rule_${phone}`;
         await ruleContainer.items.upsert({
           id: ruleId,
@@ -191,65 +252,83 @@ app.http('updateTicketsByPhone', {
           link_future: true,
           linked_patient_snapshot,
           created_at: new Date().toISOString(),
-          created_by: agent_email
+          created_by: actor_email,
         });
 
-        // ✅ Enviar una notificación mínima a SignalR (regla)
-        await notifySignalR({ type: 'future_rule', phone, patient_id }, context);
+        // Notificación mínima opcional
+        // await notifySignalR({ type: 'future_rule', phone, patient_id }, context);
 
-        return success('Future link rule saved', { phone, patient_id }, 201);
+        return success('Operation successfull', { phone, patient_id, ruleId }, 201);
       }
 
-      // 👉 UNLINK
+      // ====== ACTION: unlink ======
       if (action === 'unlink') {
+        // Lee ticket
         const item = container.item(ticket_id, ticket_id);
-        const { resource: ticket } = await item.read();
+        const { resource: ticket } = await item.read().catch((e) => {
+          throw { _msg: 'Error reading ticket.', err: e };
+        });
+        if (!ticket) return badRequest('Ticket not found.');
+
+        // Permisos: asignado / colaborador / supervisor
+        const isAssigned = lc(ticket.agent_assigned) === lc(actor_email);
+        const isCollaborator = Array.isArray(ticket.collaborators)
+          && ticket.collaborators.map(lc).includes(lc(actor_email));
+
+        if (!isSupervisor && !isAssigned && !isCollaborator) {
+          return { status: 403, jsonBody: { error: 'Insufficient permission for unlink.' } };
+        }
 
         const patchOps = [];
 
         if (ticket.patient_id) {
           patchOps.push({ op: 'remove', path: '/patient_id' });
         }
-
         if (ticket.linked_patient_snapshot) {
           patchOps.push({ op: 'remove', path: '/linked_patient_snapshot' });
         }
-
         if (!Array.isArray(ticket.notes)) {
           patchOps.push({ op: 'add', path: '/notes', value: [] });
         }
-
         patchOps.push({
           op: 'add',
           path: '/notes/-',
           value: {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
-            agent_email,
-            event: `Unlinked ticket from patient_id`
-          }
+            agent_email: actor_email,
+            event: `Unlinked ticket from patient_id`,
+          },
         });
 
         if (patchOps.length > 0) {
-          await item.patch(patchOps);
+          await item.patch(patchOps).catch((e) => {
+            throw { _msg: 'Error patching ticket.', err: e };
+          });
         }
 
-        // ✅ Forzar lectura fresca desde Cosmos (sin usar el item en caché)
+        // Releer actualizado y devolver DTO completo
         const { resource: updatedTicket } = await container
           .item(ticket_id, ticket_id)
-          .read({ consistencyLevel: "Strong" });
+          .read({ consistencyLevel: 'Strong' });
 
-        delete updatedTicket.patient_id;
-        delete updatedTicket.linked_patient_snapshot;
-        //console.log(updatedTicket)
-        await notifySignalR(updatedTicket, context);
+        const dto = validateAndFormatTicket(updatedTicket, badRequest, context);
+        // await notifySignalR(dto, context);
 
-        return success(`Unlinked ticket ${updatedTicket}`, { updatedTicket }, 201);
+        return success('Operation successfull', dto, 201);
       }
 
-
-    } catch (err) {
-      return error('Error', 500, err.message);
+      // Fallback (no debería llegar aquí)
+      return badRequest('Unsupported action.');
+    } catch (e) {
+      if (e && e._msg) {
+        return error(e._msg, 500, e.err?.message || e.err || 'Unknown');
+      }
+      return error('Error', 500, e?.message || 'Unknown');
     }
-  }
+  }, {
+    // 🔐 Auth a nivel de endpoint
+    scopesAny: ['access_as_user'],
+    groupsAny: [GROUP_REFERRALS_ACCESS],
+  })
 });
