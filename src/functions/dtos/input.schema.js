@@ -97,6 +97,17 @@ const updateTicketDepartmentInput = Joi.object({
   newDepartment: Joi.string().min(2).max(100).required().label('newDepartment'),
 });
 
+//Esquema: Actualizacion de colaboradores del ticket
+const updateTicketCollaboratorsInput = Joi.object({
+  ticketId: Joi.string().uuid().required().label('ticketId'),
+  // Permite vaciar colaboradores pasando [] (para limpiar la lista)
+  collaborators: Joi.array()
+    .items(Joi.string().email().label('collaborator.email'))
+    .required()
+    .label('collaborators'),
+});
+
+
 
 
 
@@ -109,5 +120,6 @@ module.exports = {
   updatePatientDOBInput,
   updatePatientPhoneInput,
   updateTicketDepartmentInput,
-  BASE_STATUSES, SUPERVISOR_STATUSES
+  BASE_STATUSES, SUPERVISOR_STATUSES,
+  updateTicketCollaboratorsInput
 };

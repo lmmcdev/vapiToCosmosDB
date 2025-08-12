@@ -1,119 +1,181 @@
+// src/functions/cosmoUpdateCollaborators/index.js (CommonJS)
+const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+
 const { getContainer } = require('../shared/cosmoClient');
 const { success, error, badRequest, notFound } = require('../shared/responseUtils');
+const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 
-const isValidEmail = (email) =>
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+// 🔐 Auth utils
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+
+// DTO de entrada (añádelo a ./dtos/input.schema.js y exporta updateTicketCollaboratorsInput)
+const { updateTicketCollaboratorsInput } = require('./dtos/input.schema');
+
+const {
+  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si luego permites agentes
+} = GROUPS.REFERRALS;
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
+/*async function notifySignalR(payload, context) {
+  if (!signalRUrl) return;
+  try {
+    await fetch(signalRUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    context.log('⚠️ SignalR failed:', e.message);
+  }
+}*/
+
+const lc = (s) => (s || '').toLowerCase();
 
 app.http('cosmoUpdateCollaborators', {
+  route: 'cosmoUpdateCollaborators',
   methods: ['PATCH'],
   authLevel: 'anonymous',
-  handler: async (req, context) => {
-    const { ticketId, collaborators = [], agent_email } = await req.json();
-
-    if (!ticketId || !Array.isArray(collaborators)) {
-      return badRequest('Missing ticketId or collaborators array.');
-    }
-
-    const incomingClean = [...new Set(
-      collaborators.map(e => e.trim().toLowerCase())
-    )];
-
-    const invalid = incomingClean.filter(email => !isValidEmail(email));
-    if (invalid.length > 0) {
-      return badRequest(`Invalid email(s): ${invalid.join(', ')}`);
-    }
-
-    const container = getContainer();
-    const item = container.item(ticketId, ticketId);
-
+  handler: withAuth(async (req, context) => {
     try {
-      const { resource } = await item.read();
-      if (!resource) return notFound('Ticket not found.');
+      // 1) Actor desde el token
+      const claims = context.user;
+      const actor_email = getEmailFromClaims(claims);
+      if (!actor_email) {
+        return { status: 401, jsonBody: { error: 'Email not found in token' } };
+      }
 
-      const current = Array.isArray(resource.collaborators)
-        ? resource.collaborators.map(e => e.trim().toLowerCase())
-        : [];
+      // 2) Rol efectivo (supervisor/agent) a partir de grupos
+      const { role, isSupervisor, isAgent } = getRoleGroups(claims, {
+        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+      });
+      if (!role) {
+        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
+      }
 
-      const assignedAgent = resource.assigned_agent?.trim().toLowerCase();
+      // 3) Parse + valida entrada con DTO
+      let body;
+      try {
+        body = await req.json();
+      } catch {
+        return badRequest('Invalid JSON body.');
+      }
 
-      // ❌ Validación explícita: el assigned agent no puede estar en los colaboradores
+      const { error: vErr, value } = updateTicketCollaboratorsInput.validate(body, {
+        abortEarly: false,
+        stripUnknown: true,
+      });
+      if (vErr) {
+        const details = vErr.details?.map(d => d.message).join('; ') || 'Invalid input.';
+        return badRequest(details);
+      }
+
+      const { ticketId, collaborators = [] } = value;
+
+      // 4) Leer ticket
+      const container = getContainer();
+      const item = container.item(ticketId, ticketId);
+
+      let existing;
+      try {
+        ({ resource: existing } = await item.read());
+      } catch (e) {
+        return error('Failed to read ticket.', 500, e.message);
+      }
+      if (!existing) return notFound('Ticket not found.');
+
+      // 5) Autorización por contexto del ticket:
+      //    - Supervisor, o
+      //    - Agente asignado al ticket, o
+      //    - Colaborador actual del ticket
+      const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
+      const isCollaborator = Array.isArray(existing.collaborators)
+        && existing.collaborators.map(lc).includes(lc(actor_email));
+
+      if (!isSupervisor && !isAssigned && !isCollaborator) {
+        return { status: 403, jsonBody: { error: 'Insufficient permissions to update collaborators.' } };
+      }
+
+      // 6) Normalizar lista entrante (lowercase + trim + únicos)
+      const incomingClean = [...new Set(
+        collaborators.map(e => lc(String(e).trim())).filter(Boolean)
+      )];
+
+      // 7) Regla de negocio: el agente asignado NO puede estar en colaboradores
+      const assignedAgent = lc(existing.agent_assigned);
       if (assignedAgent && incomingClean.includes(assignedAgent)) {
         return badRequest(`Assigned agent (${assignedAgent}) cannot be a collaborator.`);
       }
 
-      const finalCollaborators = incomingClean;
+      // Estado actual normalizado
+      const current = Array.isArray(existing.collaborators)
+        ? existing.collaborators.map(lc)
+        : [];
 
-      // Determinar cambios
-      const removed = current.filter(e => !finalCollaborators.includes(e));
-      const added = finalCollaborators.filter(e => !current.includes(e));
+      // 8) Determinar diferencias
+      const removed = current.filter(e => !incomingClean.includes(e));
+      const added = incomingClean.filter(e => !current.includes(e));
 
       if (removed.length === 0 && added.length === 0) {
         return badRequest('No changes to collaborators.');
       }
 
-      await item.patch([
-        {
-          op: 'replace',
-          path: '/collaborators',
-          value: finalCollaborators
-        },
-        {
-          op: 'add',
-          path: '/notes/-',
-          value: {
-            datetime: new Date().toISOString(),
-            event_type: 'system_log',
-            agent_email: agent_email || 'SYSTEM',
-            event: `Updated collaborators. Added: ${added.join(', ') || 'None'}, Removed: ${removed.join(', ') || 'None'}`
-          }
-        }
-      ]);
+      // 9) Construir patchOps
+      const patchOps = [];
 
-      const { resource: updated } = await item.read();
-
-      const responseData = {
-        id: updated.id,
-        summary: updated.summary,
-        call_reason: updated.call_reason,
-        creation_date: updated.creation_date,
-        patient_name: updated.patient_name,
-        patient_dob: updated.patient_dob,
-        caller_name: updated.caller_name,
-        callback_number: updated.callback_number,
-        caller_id: updated.caller_id,
-        call_cost: updated.call_cost,
-        notes: updated.notes,
-        collaborators: updated.collaborators,
-        url_audio: updated.url_audio,
-        assigned_department: updated.assigned_department,
-        assigned_role: updated.assigned_role,
-        caller_type: updated.caller_type,
-        call_duration: updated.call_duration,
-        status: updated.status,
-        agent_assigned: updated.agent_assigned,
-        tiket_source: updated.tiket_source,
-        phone: updated.phone,
-        work_time: updated.work_time
-      };
-
-      try {
-        await fetch(signalRUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData)
-        });
-        console.log('sending signalr')
-      } catch (e) {
-        context.log('⚠️ SignalR failed:', e.message);
+      if (Array.isArray(existing.collaborators)) {
+        patchOps.push({ op: 'replace', path: '/collaborators', value: incomingClean });
+      } else {
+        patchOps.push({ op: 'add', path: '/collaborators', value: incomingClean });
       }
 
-      return success('Collaborators updated.', { added, removed });
-    } catch (err) {
-      return error('Failed to update collaborators', 500, err.message);
+      if (!Array.isArray(existing.notes)) {
+        patchOps.push({ op: 'add', path: '/notes', value: [] });
+      }
+
+      patchOps.push({
+        op: 'add',
+        path: '/notes/-',
+        value: {
+          datetime: new Date().toISOString(),
+          event_type: 'system_log',
+          agent_email: actor_email,
+          event: `Updated collaborators. Added: ${added.join(', ') || 'None'}, Removed: ${removed.join(', ') || 'None'}`,
+        },
+      });
+
+      // 10) Aplicar patch y releer
+      try {
+        await item.patch(patchOps);
+        ({ resource: existing } = await item.read());
+      } catch (e) {
+        return error('Failed to update collaborators', 500, e.message);
+      }
+
+      // 11) Formatear DTO de salida y notificar
+      let dto;
+      try {
+        dto = validateAndFormatTicket(existing, badRequest, context);
+      } catch (badReq) {
+        return badReq;
+      }
+
+      //await notifySignalR(dto, context);
+
+      // 12) Responder ticket completo
+      return success('Operation successfull', dto);
+    } catch (e) {
+      return error('Failed to update collaborators', 500, e?.message || 'Unknown');
     }
-  }
+  }, {
+    // 🔐 Protecciones a nivel de endpoint
+    scopesAny: ['access_as_user'],
+    groupsAny: [GROUP_REFERRALS_ACCESS],
+  })
 });
