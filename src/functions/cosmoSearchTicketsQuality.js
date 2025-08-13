@@ -1,10 +1,20 @@
+// src/functions/searchTicketsQuality/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { success, error, badRequest } = require('../shared/responseUtils');
 
-const congnitiveURL = process.env.COGNITIVE_AI_URL;
-const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY;
-const indexName = 'index-tickets';
+// 🔐 Auth utils
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
 
+// Limita el acceso SOLO al grupo de QUALITY
+const { QUALITY_GROUP } = GROUPS.QUALITY;
+
+// === Config Cognitive Search ===
+const congnitiveURL = process.env.COGNITIVE_AI_URL;     // ojo: mantiene tu nombre de var
+const cognitiveKEY  = process.env.COGNITIVE_AI_API_KEY; // api-key
+const indexName     = 'index-tickets';
+
+// ===== Helpers de validación/transformación =====
 function cleanQueryInput(raw) {
   if (!raw) return '';
   return raw.replace(/^[CH]:\s*/i, '').replace(/[^\dA-Za-z\s@.-]/g, '').trim();
@@ -24,25 +34,24 @@ function buildFilter(filters = {}) {
   if (filters.createdAt) {
     const { from, to } = filters.createdAt;
     if (from) parts.push(`createdAt ge ${from}`);
-    if (to) parts.push(`createdAt le ${to}`);
+    if (to)   parts.push(`createdAt le ${to}`);
   }
 
   return parts.length ? parts.join(' and ') : null;
 }
 
 function validateFilterString(filter) {
-  // Permitir campos específicos y operadores válidos
+  // Campos y operadores permitidos para OData filter
   const allowedFields = ['status', 'assigned_department', 'createdAt', 'agent_assigned'];
   const allowedOps = ['eq', 'ge', 'le'];
 
-  const conditions = filter.split('and').map(s => s.trim());
+  const conditions = filter.split(/and/i).map(s => s.trim()).filter(Boolean);
 
   for (const cond of conditions) {
     const parts = cond.split(/\s+/);
     if (parts.length < 3) {
       return `Invalid filter condition: ${cond}`;
     }
-
     const [field, op] = parts;
     if (!allowedFields.includes(field)) {
       return `Invalid field in filter: ${field}`;
@@ -54,10 +63,15 @@ function validateFilterString(filter) {
   return null; // OK
 }
 
+// ===== Function =====
 app.http('searchTicketsQuality', {
   methods: ['POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(async (request, context) => {
+    // (Opcional) Podrías auditar quién consulta:
+    // const email = (context.user?.preferred_username || context.user?.upn || context.user?.email || '').toLowerCase();
+    // context.log(`QUALITY search by: ${email}`);
+
     let body;
     try {
       body = await request.json();
@@ -71,16 +85,17 @@ app.http('searchTicketsQuality', {
       return badRequest('Provide at least a query or filters');
     }
 
-    /*if (query === '*') {
-      return badRequest('Avoid using wildcard search (*)');
-    }*/
+    // Si quieres evitar *:
+    // if (query === '*') return badRequest('Avoid using wildcard search (*)');
 
     const cleanedQuery = cleanQueryInput(query);
-    const skip = (page - 1) * size;
+    const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+    const safeSize = Number.isInteger(size) && size > 0 ? size : 50;
+    const skip = (safePage - 1) * safeSize;
 
     const searchPayload = {
       search: cleanedQuery || "*",
-      top: size,
+      top: safeSize,
       skip,
       count: true,
       searchFields: cleanedQuery
@@ -126,5 +141,10 @@ app.http('searchTicketsQuality', {
       context.log(err.message);
       return error('Search error', 500, err.message);
     }
-  }
+  }, {
+    // 🔐 Requiere scope del API (si lo usas en tu app registration)
+    scopesAny: ['access_as_user'],
+    // 🔐 SOLO miembros del grupo de QUALITY
+    groupsAny: [QUALITY_GROUP],
+  })
 });
