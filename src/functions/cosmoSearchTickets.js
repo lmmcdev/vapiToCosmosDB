@@ -11,8 +11,8 @@ const {searchBodySchema} = require('./dtos/input.schema');
 const { SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS } = GROUPS.REFERRALS;
 
 // --- Config Search ---
-const congnitiveURL = process.env.COGNITIVE_AI_URL || 'https://cognitivesearchcservices.search.windows.net';
-const cognitiveKEY  = process.env.COGNITIVE_AI_API_KEY || '20KhVAS6J30pV0LaVwNBvW4MeIBGMeMtYlphWhQcBHAzSeAWFY6q';
+const congnitiveURL = process.env.COGNITIVE_AI_URL;
+const cognitiveKEY  = process.env.COGNITIVE_AI_API_KEY;
 const API_VERSION   = process.env.SEARCH_API_VERSION || '2025-05-01-Preview';
 const indexName     = 'index-tickets';
 
