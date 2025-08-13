@@ -1,86 +1,85 @@
+// src/functions/cosmoUpdateNotesQuality/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { getAgentContainer } = require('../shared/cosmoAgentClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
+
+// 🔐 Auth utils
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims } = require('./auth/auth.helper');
+
+// Grupo QUALITY (acceso exclusivo)
+const { QUALITY: { QUALITY_GROUP } } = GROUPS;
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('cosmoUpdateNotesQuality', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
-  handler: async (req, context) => {
-    let ticketId, notes, agent_email, event;
-
+  handler: withAuth(async (req, context) => {
     try {
-      ({ ticketId, notes, agent_email, event } = await req.json());
-    } catch (err) {
-      return badRequest('Invalid JSON.');
-    }
+      // 1) Claims: email y grupos desde el token
+      const claims = context.user || {};
+      const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
+      const agent_email = getEmailFromClaims(claims);
+      if (!agent_email) {
+        return { status: 401, jsonBody: { error: 'Email not found in token' } };
+      }
+      // Defensa adicional (además de groupsAny en wrapper)
+      if (!tokenGroups.includes(QUALITY_GROUP)) {
+        return { status: 403, jsonBody: { error: 'Insufficient group membership (Quality only)' } };
+      }
 
-    if (!ticketId || !agent_email) {
-      return badRequest('Missing parameters: ticketId or agent_email.');
-    }
-
-    if (!Array.isArray(notes) && !event) {
-      return badRequest('Missing notes array or event.');
-    }
-
-    if (Array.isArray(notes)) {
-      for (const [i, note] of notes.entries()) {
-        if (
-          typeof note !== 'object' ||
-          !note.agent_email ||
-          typeof note.agent_email !== 'string'
-        ) {
-          return badRequest(`Note at index ${i} is missing a valid 'agent_email'.`);
+      // 2) Body
+      let body;
+      try {
+        body = await req.json();
+      } catch {
+        return badRequest('Invalid JSON.');
+      }
+      const { ticketId, notes, event } = body || {};
+      if (!ticketId) return badRequest('Missing parameter: ticketId.');
+      if (!Array.isArray(notes) && !event) {
+        return badRequest('Provide at least "notes" (array) and/or "event" (string).');
+      }
+      if (Array.isArray(notes)) {
+        for (let i = 0; i < notes.length; i++) {
+          const n = notes[i];
+          if (!n || typeof n !== 'object' || typeof n.event !== 'string' || !n.event.trim()) {
+            return badRequest(`Invalid note at index ${i}: must include non-empty "event" string.`);
+          }
         }
       }
-    }
 
-    const ticketContainer = getContainer();
-    const agentContainer = getAgentContainer();
-    const ticketItem = ticketContainer.item(ticketId, ticketId);
-
-    try {
+      // 3) Leer ticket
+      const ticketContainer = getContainer();
+      const ticketItem = ticketContainer.item(ticketId, ticketId);
       const { resource: ticket } = await ticketItem.read();
       if (!ticket) return notFound('Ticket not found.');
 
-      // Fetch agent info
-      const query = {
-        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
-        parameters: [{ name: '@agent_email', value: agent_email }]
-      };
-      const { resources: agents } = await agentContainer.items.query(query).fetchAll();
-      if (!agents.length) return badRequest('Agent not found.');
-
-      const agent = agents[0];
-      const role = agent.agent_rol || 'Agent';
-
-      const isQuality = role === 'Quality';
-
-      if (!isQuality) {
-        return badRequest('You do not have permission to update notes on this ticket.');
-      }
-
+      // 4) Construir patchOps (todas las notas como 'quality_note')
       const patchOps = [];
-
       if (!Array.isArray(ticket.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
+      let addedCount = 0;
+
       if (Array.isArray(notes) && notes.length > 0) {
-        for (const note of notes) {
+        for (const n of notes) {
           patchOps.push({
             op: 'add',
             path: '/notes/-',
             value: {
-              ...note,
-              datetime: note.datetime || new Date().toISOString(),
-              event_type: 'quality_note'
+              datetime: n.datetime || new Date().toISOString(),
+              event_type: 'quality_note',
+              agent_email,         // del token
+              event: n.event.trim()
             }
           });
+          addedCount++;
         }
-
+        // Resumen de sistema
         patchOps.push({
           op: 'add',
           path: '/notes/-',
@@ -88,12 +87,12 @@ app.http('cosmoUpdateNotesQuality', {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
             agent_email,
-            event: `Added ${notes.length} note(s) to the ticket.`
+            event: `Added ${notes.length} quality note(s).`
           }
         });
       }
 
-      if (event) {
+      if (event && typeof event === 'string' && event.trim()) {
         patchOps.push({
           op: 'add',
           path: '/notes/-',
@@ -101,19 +100,21 @@ app.http('cosmoUpdateNotesQuality', {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
             agent_email,
-            event
+            event: event.trim()
           }
         });
+        addedCount++;
       }
 
       if (patchOps.length === 0) {
         return badRequest('No valid operations to apply.');
       }
 
+      // 5) Aplicar patch y releer
       await ticketItem.patch(patchOps);
-
       const { resource: updated } = await ticketItem.read();
 
+      // 6) Payload de respuesta y SignalR
       const responseData = {
         id: updated.id,
         summary: updated.summary,
@@ -135,27 +136,34 @@ app.http('cosmoUpdateNotesQuality', {
         status: updated.status,
         agent_assigned: updated.agent_assigned,
         tiket_source: updated.tiket_source,
-        quality_control: updated.quality_control,
         phone: updated.phone,
-        work_time: updated.work_time
+        work_time: updated.work_time,
+        aiClassification: updated.aiClassification,
+        quality_control: updated.quality_control,
+        linked_patient_snapshot: updated.linked_patient_snapshot
       };
 
       try {
-        await fetch(signalRUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData)
-        });
+        if (signalRUrl) {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(responseData)
+          });
+        }
       } catch (e) {
         context.log('⚠️ SignalR failed:', e.message);
       }
 
-
-      return success('Notes updated successfully.', {responseData});
-
+      return success('Notes updated successfully.', { added: addedCount, ticket: responseData });
     } catch (err) {
-      context.log('❌ Error updating notes:', err);
+      context.log('❌ Error updating quality notes:', err);
       return error('Internal Server Error', 500, err.message);
     }
-  }
+  }, {
+    // Requiere scope de la API…
+    scopesAny: ['access_as_user'],
+    // …y pertenecer al grupo QUALITY
+    groupsAny: [QUALITY_GROUP],
+  })
 });
