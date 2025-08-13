@@ -1,56 +1,63 @@
+// src/functions/cosmoGetQuality/index.js (CommonJS)
 const { app } = require('@azure/functions');
-const { getQAContainer } = require('../shared/cosmoQAClient'); // contenedor QC
-const { getAgentContainer } = require('../shared/cosmoAgentClient');
+const { getQAContainer } = require('../shared/cosmoQAClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
+
+// Auth utils
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims } = require('./auth/auth.helper');
+
+// ⚙️ Grupo permitido (Quality)
+const { QUALITY: { QUALITY_GROUP } } = GROUPS;
 
 app.http('cosmoGetQuality', {
   methods: ['GET'],
   authLevel: 'anonymous',
-  handler: async (req, context) => {
+  handler: withAuth(async (req, context) => {
     try {
-      const agentEmail = req.query.get('agent_assigned');
-      if (!agentEmail) return badRequest("Missing 'agent_assigned' in query.");
+      // 1) Extraer claims del token
+      const claims = context.user || {};
 
-      const agentContainer = getAgentContainer();
+      // 2) Email desde el token (preferred_username / upn / email)
+      const email = getEmailFromClaims(claims);
+      if (!email) {
+        return { status: 401, jsonBody: { error: 'Email not found in token' } };
+      }
+
+      // 3) Grupos del token
+      const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
+
+      // Defensa en profundidad: verificar membresía Quality
+      if (!tokenGroups.includes(QUALITY_GROUP)) {
+        return { status: 403, jsonBody: { error: 'Insufficient group membership (Quality only)' } };
+      }
+
+      // (Opcional) Log de auditoría
+      context.log(`QA list requested by ${email}. Groups: ${tokenGroups.join(', ')}`);
+
+      // 4) Consulta a Cosmos (QA)
       const ticketContainer = getQAContainer();
 
-      // ✅ Buscar agente
-      const { resources: agentResult } = await agentContainer.items
-        .query({
-          query: "SELECT * FROM c WHERE c.agent_email = @agentEmail",
-          parameters: [{ name: "@agentEmail", value: agentEmail }]
-        })
-        .fetchAll();
-
-      if (!agentResult.length) return badRequest("Agent not found.");
-
-      const { agent_department, agent_rol, agent_extension } = agentResult[0];
-
-      let query, parameters;
-
-      if (agent_rol !== "Quality") return
-
-     
-        query = `
-          SELECT *
-          FROM c
-        `;
-      
-
       const { resources: tickets } = await ticketContainer.items
-        .query({ query, parameters })
+        .query({ query: 'SELECT * FROM c' })
         .fetchAll();
 
-      // ✅ Devolver linked_patient_snapshot siempre presente
-      const finalTickets = tickets.map(ticket => ({
-        ...ticket,
-        linked_patient_snapshot: ticket.linked_patient_snapshot || {}
+      // 5) Normalizar linked_patient_snapshot
+      const finalTickets = tickets.map(t => ({
+        ...t,
+        linked_patient_snapshot: t.linked_patient_snapshot || {}
       }));
 
+      // 6) Respuesta
       return success(finalTickets);
     } catch (err) {
-      context.log('❌ Error al consultar tickets:', err);
+      context.log('❌ Error al consultar Quality tickets:', err);
       return error('Error al consultar tickets', err);
     }
-  }
+  }, {
+    // Requiere token válido y pertenecer al grupo de Quality
+    scopesAny: ['access_as_user'],
+    groupsAny: [QUALITY_GROUP],
+  })
 });
