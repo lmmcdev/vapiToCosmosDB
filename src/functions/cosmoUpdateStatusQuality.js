@@ -1,8 +1,16 @@
+// src/functions/cosmoUpdateStatusQuality/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { getAgentContainer } = require('../shared/cosmoAgentClient');
-const { getQAContainer } = require('../shared/cosmoQAClient'); // contenedor QC
+const { getQAContainer } = require('../shared/cosmoQAClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
+
+// 🔐 Auth utils
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+const { getEmailFromClaims } = require('./auth/auth.helper');
+
+// Grupo QUALITY
+const { QUALITY: { QUALITY_GROUP } } = GROUPS;
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
@@ -10,43 +18,46 @@ const signalRUrlStats = process.env.SIGNAL_BROADCAST_URL3;
 app.http('cosmoUpdateStatusQuality', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
-  handler: async (req, context) => {
-    let ticketId, newStatus, agent_email;
-
+  handler: withAuth(async (req, context) => {
     try {
-      ({ ticketId, newStatus, agent_email } = await req.json());
-    } catch {
-      return badRequest('Invalid JSON.');
-    }
-    if (!ticketId || !newStatus || !agent_email) {
-      return badRequest('Missing parameters: ticketId, status or agent_email.');
-    }
+      // 1) Claims del token
+      const claims = context.user || {};
+      const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
+      const agent_email = getEmailFromClaims(claims);
+      if (!agent_email) {
+        return { status: 401, jsonBody: { error: 'Email not found in token' } };
+      }
 
-    const container = getContainer();
-    const agentContainer = getAgentContainer();
-    const qcContainer = getQAContainer();
+      // Defensa en profundidad (además de groupsAny en withAuth)
+      if (!tokenGroups.includes(QUALITY_GROUP)) {
+        return { status: 403, jsonBody: { error: 'Insufficient group membership (Quality only)' } };
+      }
 
-    const item = container.item(ticketId, ticketId);
-    try {
+      // 2) Body
+      let body;
+      try {
+        body = await req.json();
+      } catch {
+        return badRequest('Invalid JSON.');
+      }
+      const { ticketId, newStatus } = body || {};
+      if (!ticketId || !newStatus) {
+        return badRequest('Missing parameters: ticketId or newStatus.');
+      }
+
+      // 3) Leer ticket
+      const container = getContainer();
+      const qcContainer = getQAContainer();
+
+      const item = container.item(ticketId, ticketId);
       const { resource: ticket } = await item.read();
       if (!ticket) return notFound('Ticket not found.');
-
-      // Validar rol del agente
-      const querySpec = {
-        query: 'SELECT * FROM c WHERE c.agent_email = @agent_email',
-        parameters: [{ name: '@agent_email', value: agent_email }]
-      };
-      const { resources: agents } = await agentContainer.items.query(querySpec).fetchAll();
-      if (!agents.length) return badRequest('Agent not found.');
-      const agent = agents[0];
-      if (agent.agent_rol !== 'Quality') {
-        return badRequest("You do not have permission to change this ticket's status.");
-      }
 
       if (ticket.status === newStatus) {
         return badRequest('New status is the same as the current one. No changes applied.');
       }
 
+      // 4) Preparar patch (no cambiamos c.status aquí; sólo quality_control + nota)
       const quality_control = newStatus === 'QARevisionStart';
       const patchOps = [];
 
@@ -72,9 +83,9 @@ app.http('cosmoUpdateStatusQuality', {
       await item.patch(patchOps);
       const { resource: updated } = await item.read();
 
-      // Registrar o eliminar en quality_control_tickets según status
+      // 5) Crear/Eliminar en contenedor de QA
       if (quality_control) {
-        await qcContainer.items.create({
+        await qcContainer.items.upsert({
           id: ticketId,
           ticketId,
           agent_email,
@@ -94,11 +105,13 @@ app.http('cosmoUpdateStatusQuality', {
           startDate: new Date().toISOString()
         });
       } else {
+        // Si no está en QC, intentamos eliminar su entrada
         await qcContainer.item(ticketId, ticketId).delete().catch(e => {
           context.log('⚠️ Failed to delete QC entry:', e.message);
         });
       }
 
+      // 6) Payload de respuesta / SignalR
       const responseData = {
         id: updated.id,
         summary: updated.summary,
@@ -127,8 +140,8 @@ app.http('cosmoUpdateStatusQuality', {
         linked_patient_snapshot: updated.linked_patient_snapshot
       };
 
-      // Notificaciones via SignalR
       const sendSignal = async (url) => {
+        if (!url) return;
         try {
           await fetch(url, {
             method: 'POST',
@@ -145,8 +158,13 @@ app.http('cosmoUpdateStatusQuality', {
       return success('Status updated successfully.', { responseData });
 
     } catch (err) {
-      context.log('❌ Error updating status:', err);
+      context.log('❌ Error updating status (Quality):', err);
       return error('Internal Server Error', 500, err.message);
     }
-  }
+  }, {
+    // Debe ser un token válido con el scope de la API…
+    scopesAny: ['access_as_user'],
+    // …y pertenecer al grupo de QUALITY
+    groupsAny: [QUALITY_GROUP],
+  })
 });
