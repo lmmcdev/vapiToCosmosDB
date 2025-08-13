@@ -108,6 +108,23 @@ const updateTicketCollaboratorsInput = Joi.object({
 });
 
 
+// ---------- dto para busqueda de tickets ----------
+const createdAtRange = Joi.object({
+  from: Joi.string().isoDate().optional(),
+  to:   Joi.string().isoDate().optional(),
+}).optional();
+
+const searchBodySchema = Joi.object({
+  query:  Joi.string().allow('', null),
+  page:   Joi.number().integer().min(1).default(1),
+  size:   Joi.number().integer().min(1).max(200).default(50),
+  filters: Joi.object({
+    status: Joi.string().optional(),
+    assigned_department: Joi.string().optional(),
+    createdAt: createdAtRange
+  }).default({}),
+  filter: Joi.string().optional()
+});
 
 
 
@@ -121,5 +138,6 @@ module.exports = {
   updatePatientPhoneInput,
   updateTicketDepartmentInput,
   BASE_STATUSES, SUPERVISOR_STATUSES,
-  updateTicketCollaboratorsInput
+  updateTicketCollaboratorsInput,
+  searchBodySchema
 };
