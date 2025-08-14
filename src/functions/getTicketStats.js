@@ -7,7 +7,7 @@ const { success, badRequest, notFound, error } = require('../shared/responseUtil
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS, // <- SOLO supervisores
 } = GROUPS.REFERRALS;
 
 // DTOs
@@ -29,7 +29,7 @@ async function getByIdViaQuery(container, id, context) {
 }
 
 function validateOrThrowClean(doc, schema, label, context) {
-  const { error: dtoErr, value } = schema.validate(doc); // prefs en el schema
+  const { error: dtoErr, value } = schema.validate(doc); // prefs ya están en el schema
   if (dtoErr) {
     context.log(`❌ ${label} DTO validation failed:`, dtoErr.details);
     const details = dtoErr.details?.map(d => d.message) || dtoErr.message || 'Schema validation error';
@@ -47,6 +47,12 @@ app.http('getTicketStats', {
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
+      // Defensa extra: cortar si el token no trae el grupo de supervisores
+      const tokenGroups = Array.isArray(context.user?.groups) ? context.user.groups : [];
+      if (!tokenGroups.includes(GROUP_REFERRALS_SUPERVISORS)) {
+        return { status: 403, jsonBody: { error: 'Insufficient group membership (supervisors only).' } };
+      }
+
       const statsContainer = getStatsContainer();
 
       // Params
@@ -119,7 +125,8 @@ app.http('getTicketStats', {
       return error('Failed to retrieve stored stats', status, details);
     }
   }, {
+    // Solo SUPERVISORES
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: [GROUP_REFERRALS_SUPERVISORS],
   })
 });
