@@ -1,69 +1,123 @@
+// src/functions/searchPatients/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { success, error, badRequest } = require('../shared/responseUtils');
 
-const cognitiveURL = process.env.COGNITIVE_AI_URL;
-const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY;
+// Auth
+const { withAuth } = require('./auth/withAuth');
+const { GROUPS } = require('./auth/groups.config');
+
+// Grupos permitidos: Supervisores (Referrals) y Quality
+const { SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS } = GROUPS.REFERRALS || {};
+const { QUALITY_GROUP: GROUP_QUALITY } = (GROUPS.QUALITY || {});
+
+// Cognitive Search (no dejes defaults con secretos en código)
+const cognitiveURL = process.env.COGNITIVE_AI_URL || 'https://cognitivesearchcservices.search.windows.net';
+const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY || '20KhVAS6J30pV0LaVwNBvW4MeIBGMeMtYlphWhQcBHAzSeAWFY6q';
+const indexName = 'cservicespatients-index';
+
+// DTOs
+const {
+  PatientSearchInput,
+  PatientSearchOutput,
+  mapSearchResponseToDto,
+} = require('./dtos/patientSearch.dto');
 
 app.http('searchPatients', {
+  route: 'searchPatients',
   methods: ['POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
-    let body;
+  handler: withAuth(async (request, context) => {
     try {
-      body = await request.json();
-    } catch (err) {
-      return badRequest('Invalid JSON', err.message);
-    }
-
-    const requiredFields = ['query'];
-    const missingFields = requiredFields.filter(field => !body?.[field]);
-
-    if (missingFields.length > 0) {
-      return badRequest(`Missing required fields: ${missingFields.join(', ')}`);
-    }
-
-    const { query, filter = '', page = 1, size = 50 } = body;
-
-    if (query === '*') {
-      return badRequest('Avoid using wildcard search (*)');
-    }
-
-    const indexName = 'cservicespatients-index';
-    const skip = (page - 1) * size;
-
-    const searchPayload = {
-      search: query,
-      top: size,
-      skip: skip,
-      count: true
-    };
-
-    if (filter && typeof filter === 'string' && filter.trim().length > 0) {
-      searchPayload.filter = filter;
-    }
-
-    try {
-      const response = await fetch(
-        `${cognitiveURL}/indexes/${indexName}/docs/search?api-version=2025-05-01-Preview`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'api-key': cognitiveKEY
-          },
-          body: JSON.stringify(searchPayload)
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.status} ${response.statusText}`);
+      // 🔐 Re-chequeo defensivo dentro del handler
+      const claims = context.user || {};
+      const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
+      const allowedGroups = [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY].filter(Boolean);
+      const inAllowedGroup = allowedGroups.some(g => tokenGroups.includes(g));
+      if (!inAllowedGroup) {
+        context.log('🚫 Group check (handler) failed. groups:', tokenGroups);
+        return { status: 403, jsonBody: { error: 'Insufficient group membership' } };
       }
 
-      const data = await response.json();
-      return success('Search completed', data, 200);
+      // 1) Body + validación de entrada
+      let raw;
+      try {
+        raw = await request.json();
+      } catch {
+        return badRequest('Invalid JSON payload.');
+      }
+
+      const { value: input, error: dtoErr } = PatientSearchInput.validate(raw, {
+        abortEarly: false,
+        stripUnknown: true,
+      });
+      if (dtoErr) {
+        const details = dtoErr.details?.map(d => d.message).join('; ') || 'Validation error';
+        return badRequest(details);
+      }
+
+      const { query, filter = '', page, size } = input;
+
+      if (query === '*') {
+        return badRequest('Avoid using wildcard (*) as a full query.');
+      }
+
+      // 2) Payload de búsqueda
+      const skip = (page - 1) * size;
+      const payload = {
+        search: query,
+        top: size,
+        skip,
+        count: true,
+      };
+      if (filter && typeof filter === 'string' && filter.trim()) {
+        payload.filter = filter.trim();
+      }
+
+      // 3) Llamada a Cognitive Search
+      if (!cognitiveURL || !cognitiveKEY) {
+        return error('Search error', 500, 'Cognitive Search env vars not configured');
+      }
+
+      const url = `${cognitiveURL}/indexes/${indexName}/docs/search?api-version=2025-05-01-Preview`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': cognitiveKEY,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Search failed: ${res.status} ${res.statusText} - ${txt}`);
+      }
+
+      const rawData = await res.json();
+
+      // 4) Normalizar al DTO de salida
+      const dto = mapSearchResponseToDto(rawData, page, size);
+
+      // 5) Validar salida
+      const { error: outErr } = PatientSearchOutput.validate(dto, { abortEarly: false });
+      if (outErr) {
+        const details = outErr.details?.map(d => d.message).join('; ') || 'Output validation error';
+        context.log('❌ PatientSearchOutput validation failed:', details);
+        return error('Search output failed validation', 500, details);
+      }
+
+      // 6) OK
+      return success('Search completed', dto, 200);
     } catch (err) {
-      context.log(err.message);
-      return error('Search error', 500, err.message);
+      context.log('❌ searchPatients error:', err?.message || err);
+      return error('Search error', 500, err?.message || 'Unknown error');
     }
-  }
+  }, {
+    // Middleware: sólo si pertenece a Supervisores o Quality
+    // (si tu withAuth soporta groupsAny, esto ya corta antes)
+    groupsAny: [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY],
+    // Si tu withAuth usa "scopes" y NO "scopesAny", pon:
+    // scopes: ['access_as_user'],
+    // (o agrega soporte de scopesAny en withAuth)
+  })
 });
