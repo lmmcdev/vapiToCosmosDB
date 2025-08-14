@@ -7,12 +7,12 @@ const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 
 // Grupos permitidos: Supervisores (Referrals) y Quality
-const { SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS } = GROUPS.REFERRALS || {};
+const { SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS, AGENTS_GROUP: GROUP_REFERRALS_AGENTS } = GROUPS.REFERRALS || {};
 const { QUALITY_GROUP: GROUP_QUALITY } = (GROUPS.QUALITY || {});
 
 // Cognitive Search (no dejes defaults con secretos en código)
-const cognitiveURL = process.env.COGNITIVE_AI_URL || 'https://cognitivesearchcservices.search.windows.net';
-const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY || '20KhVAS6J30pV0LaVwNBvW4MeIBGMeMtYlphWhQcBHAzSeAWFY6q';
+const cognitiveURL = process.env.COGNITIVE_AI_URL;
+const cognitiveKEY = process.env.COGNITIVE_AI_API_KEY;
 const indexName = 'cservicespatients-index';
 
 // DTOs
@@ -31,7 +31,7 @@ app.http('searchPatients', {
       // 🔐 Re-chequeo defensivo dentro del handler
       const claims = context.user || {};
       const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
-      const allowedGroups = [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY].filter(Boolean);
+      const allowedGroups = [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY, GROUP_REFERRALS_AGENTS].filter(Boolean);
       const inAllowedGroup = allowedGroups.some(g => tokenGroups.includes(g));
       if (!inAllowedGroup) {
         context.log('🚫 Group check (handler) failed. groups:', tokenGroups);
@@ -114,10 +114,11 @@ app.http('searchPatients', {
     }
   }, {
     // Middleware: sólo si pertenece a Supervisores o Quality
+    scopes: ['access_as_user'],
     // (si tu withAuth soporta groupsAny, esto ya corta antes)
-    groupsAny: [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY],
+    groupsAny: [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY, GROUP_REFERRALS_AGENTS],
     // Si tu withAuth usa "scopes" y NO "scopesAny", pon:
-    // scopes: ['access_as_user'],
+    
     // (o agrega soporte de scopesAny en withAuth)
   })
 });
