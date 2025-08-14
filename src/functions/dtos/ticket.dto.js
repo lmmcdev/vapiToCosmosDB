@@ -62,7 +62,8 @@ function mapTicketToDto(ticket) {
     work_time: ticket.work_time,
     linked_patient_snapshot: ticket.linked_patient_snapshot,
     quality_control: ticket.quality_control,
-    patient_id: ticket.patient_id
+    patient_id: ticket.patient_id,
+    aiClassification: ticket.aiClassification
   };
 }
 
