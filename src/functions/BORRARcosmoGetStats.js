@@ -5,7 +5,7 @@ const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 
 dayjs.extend(utc);
-
+//BORRARRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
 app.http('cosmoGetStats', {
   methods: ['GET'],
   authLevel: 'anonymous',
