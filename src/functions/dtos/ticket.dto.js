@@ -32,7 +32,7 @@ const ticketSchema = Joi.object({
   phone: Joi.string().optional().allow(''),
   work_time: Joi.array().optional(),
   linked_patient_snapshot: Joi.any().optional().allow(null),
-  quality_control: Joi.string().optional().allow(''),
+  quality_control: Joi.any().optional().allow(''),
   patient_id: Joi.string().uuid().optional().allow(null),
   aiClassification: Joi.any().optional().allow(null)
 });
