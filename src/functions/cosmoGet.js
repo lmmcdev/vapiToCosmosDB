@@ -52,7 +52,7 @@ app.http('cosmoGet', {
                    c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
                    c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
                    c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt,
-                   c.patient_id, c.linked_patient_snapshot
+                   c.patient_id, c.linked_patient_snapshot, quality_control
             FROM c
             WHERE c.assigned_department = @department
               AND LOWER(c.status) != "done"
@@ -66,7 +66,7 @@ app.http('cosmoGet', {
                    c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
                    c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
                    c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt,
-                   c.patient_id, c.linked_patient_snapshot
+                   c.patient_id, c.linked_patient_snapshot, quality_control
             FROM c
             WHERE (
                   c.agent_assigned = @agentEmail
