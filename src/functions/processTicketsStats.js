@@ -20,8 +20,9 @@ const ALLOWED_STATUSES = DTO_ALLOWED_STATUSES || [
   'Duplicated',
 ];
 
-const signalrDailyStats = process.env.SIGNALR_SEND_GROUPS || 'https://signalrcservices.azurewebsites.net/api/signalr/send?';
+const signalrDailyStats = process.env.SIGNALR_SEND_GROUPS || 'https://signalrcservices.azurewebsites.net/api/signalr/send';
 
+//app.http('processTicketStats', {
 app.timer('processTicketStats', {
   // Cada hora en el minuto 50
   schedule: '0 50 * * * *',
@@ -162,13 +163,17 @@ app.timer('processTicketStats', {
           const resp = await fetch(signalrDailyStats, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: {
-              "groupName": "department:Referrals",
-              "target": "ticketUpdated",
-              "payload": JSON.stringify(statDoc),
-            }
+            body: JSON.stringify({
+              hub: 'ticketshubchannels',
+              groupName: 'department:Referrals',
+              target: 'dailyStats',                // <- lo que escucha tu cliente
+              payload: [ statDoc ]               // <- Azure SignalR espera 'arguments'
+            })
           });
-          context.log(`SignalR response: ${resp.status} ${resp}`);
+          const text = await resp.text();
+          context.log(`SignalR status=${resp.status} body=${text}`);
+          if (!resp.ok) throw new Error(text || resp.statusText);
+          context.log(`SignalR response: ${resp.status} ${JSON.parse(resp)}`);
         } catch (e) {
           context.log(`SignalR failed: ${e.message} ${e}`);
         }
