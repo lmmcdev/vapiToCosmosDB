@@ -159,7 +159,7 @@ app.http('cosmoUpdateStatus', {
         }
       }
 
-      if ((existing.status === 'Done' || newStatus === 'Done') && signalRClosed) {
+      /*if ((existing.status === 'Done' || newStatus === 'Done') && signalRClosed) {
         try {
           await fetch(signalRClosed, {
             method: 'POST',
@@ -169,7 +169,7 @@ app.http('cosmoUpdateStatus', {
         } catch (e) {
           context.log('⚠️ SignalR closedTickets failed:', e.message);
         }
-      }
+      }*/
 
       // 12) Responder (ticket completo)
       return success('Operation successfull', formattedDto);
