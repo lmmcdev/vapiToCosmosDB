@@ -281,12 +281,20 @@ app.http('updateTicketsByPhone', {
 
         const patchOps = [];
 
-        if (ticket.patient_id) {
-          patchOps.push({ op: 'remove', path: '/patient_id' });
-        }
-        if (ticket.linked_patient_snapshot) {
-          patchOps.push({ op: 'remove', path: '/linked_patient_snapshot' });
-        }
+        // Helper: setear propiedad a null conservando la key en el documento
+        const setNull = (prop) => {
+          if (Object.prototype.hasOwnProperty.call(ticket, prop)) {
+            patchOps.push({ op: 'replace', path: `/${prop}`, value: null });
+          } else {
+            patchOps.push({ op: 'add', path: `/${prop}`, value: null });
+          }
+        };
+
+        // Dejar en null (no eliminar)
+        setNull('patient_id');
+        setNull('linked_patient_snapshot');
+
+        // Notas
         if (!Array.isArray(ticket.notes)) {
           patchOps.push({ op: 'add', path: '/notes', value: [] });
         }
@@ -297,7 +305,7 @@ app.http('updateTicketsByPhone', {
             datetime: new Date().toISOString(),
             event_type: 'system_log',
             agent_email: actor_email,
-            event: `Unlinked ticket from patient_id`,
+            event: 'Unlinked ticket from patient_id',
           },
         });
 
@@ -313,10 +321,9 @@ app.http('updateTicketsByPhone', {
           .read({ consistencyLevel: 'Strong' });
 
         const dto = validateAndFormatTicket(updatedTicket, badRequest, context);
-        // await notifySignalR(dto, context);
-
         return success('Operation successfull', dto, 201);
       }
+
 
       // Fallback (no debería llegar aquí)
       return badRequest('Unsupported action.');
