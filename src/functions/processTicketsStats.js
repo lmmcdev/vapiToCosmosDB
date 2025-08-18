@@ -20,7 +20,7 @@ const ALLOWED_STATUSES = DTO_ALLOWED_STATUSES || [
   'Duplicated',
 ];
 
-const signalrDailyStats = process.env.SIGNAL_BROADCAST_URL5;
+const signalrDailyStats = process.env.SIGNALR_SEND_GROUPS || 'https://signalrcservices.azurewebsites.net/api/signalr/send?';
 
 app.timer('processTicketStats', {
   // Cada hora en el minuto 50
@@ -162,7 +162,11 @@ app.timer('processTicketStats', {
           const resp = await fetch(signalrDailyStats, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(statDoc),
+            body: {
+              "groupName": "department:Referrals",
+              "target": "ticketUpdated",
+              "payload": JSON.stringify(statDoc),
+            }
           });
           context.log(`SignalR response: ${resp.status}`);
         } catch (e) {
