@@ -168,9 +168,9 @@ app.timer('processTicketStats', {
               "payload": JSON.stringify(statDoc),
             }
           });
-          context.log(`SignalR response: ${resp.status}`);
+          context.log(`SignalR response: ${resp.status} ${resp}`);
         } catch (e) {
-          context.log(`SignalR failed: ${e.message}`);
+          context.log(`SignalR failed: ${e.message} ${e}`);
         }
       }
     } catch (err) {
