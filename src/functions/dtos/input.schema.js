@@ -42,7 +42,7 @@ const updateTicketNotesInput = Joi.object({
   notes: Joi.array()
     .items(
       Joi.object({
-        agent_email: Joi.string().email().required().label('note.agent_email'),
+        //agent_email: Joi.string().email().required().label('note.agent_email'),
         event_type: Joi.string().valid('user_note', 'system_log').required().label('note.event_type'),
         event: Joi.string().min(1).max(1000).required().label('note.content'),
         datetime: Joi.string().isoDate().optional().label('note.datetime')
