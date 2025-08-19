@@ -13,7 +13,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const MIAMI_TZ = 'America/New_York';
-const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
+const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
 
 const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const openaiApiKey = process.env.AZURE_OPENAI_KEY;
@@ -77,11 +77,17 @@ setInterval(async () => {
 
   // Notify SignalR
   for (const doc of batch) {
+    const assigned_department = doc.assigned_department
     try {
       fetch(signalRUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(doc),
+        body: JSON.stringify({
+              hub: 'ticketshubchannels',
+              groupName: `department:${assigned_department}`, //same way in frontend
+              target: 'ticketCreated',
+              payload: doc           
+            })
       });
     } catch (e) {
       console.warn('SignalR notify failed:', e.message);
@@ -210,6 +216,7 @@ app.http('cosmoInsertVapi', {
       caller_name: body.message.analysis.structuredData?.nombreapellidos_familiar,
       callback_number: body.message.analysis.structuredData?.numero_alternativo,
       phone,
+      patient_id:"",
       linked_patient_snapshot,
       url_audio: body.message.stereoRecordingUrl,
       caller_id: body.message.phoneNumber?.name,
