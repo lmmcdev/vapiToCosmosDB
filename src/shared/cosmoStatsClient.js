@@ -14,19 +14,3 @@ const getStatsContainer = () => {
 
 module.exports = { getStatsContainer };
 
-//LOCALHOST
-/*const { CosmosClient } = require("@azure/cosmos");
-
-const endpoint = "https://lmmccosmos02.documents.azure.com:443/";
-const key = ""; // la clave primaria
-
-const client = new CosmosClient({
-  endpoint,
-  key
-});
-
-const getStatsContainer = () => {
-  const db = client.database("IAData");
-  return db.container("tickets_stats");
-};
-module.exports = { getStatsContainer };*/
