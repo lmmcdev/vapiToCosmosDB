@@ -14,6 +14,7 @@ dayjs.extend(timezone);
 
 const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
+// || 'http://localhost:7072/api/signalr/send-group?code=NxMIigLrz02jzHPceCkU5K7slBLxFDPVBwx1dxS0W4gWAzFuf__Y3Q==';
 
 const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const openaiApiKey = process.env.AZURE_OPENAI_KEY;
@@ -216,7 +217,7 @@ app.http('cosmoInsertVapi', {
       caller_name: body.message.analysis.structuredData?.nombreapellidos_familiar,
       callback_number: body.message.analysis.structuredData?.numero_alternativo,
       phone,
-      patient_id:"",
+      patient_id: patient_id,
       linked_patient_snapshot,
       url_audio: body.message.stereoRecordingUrl,
       caller_id: body.message.phoneNumber?.name,
