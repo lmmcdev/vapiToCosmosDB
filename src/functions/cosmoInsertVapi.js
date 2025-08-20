@@ -107,7 +107,7 @@ app.http('cosmoInsertVapi', {
       return badRequest('Invalid JSON');
     }
 
-    if (!body?.message?.analysis?.summary) {
+    if (!body?.message?.analysis?.structuredData?.summary) {
       return badRequest('Missing summary');
     }
 
