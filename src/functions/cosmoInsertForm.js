@@ -64,38 +64,41 @@ app.http('cosmoInsertForm', {
       const phone = normalizePhone(rawPhone);
       let patient_id = null;
       let linked_patient_snapshot = null;
-
+      console.log(rawPhone)
+      const patientsContainer = getPatientsContainer();
       try {
         if (phone) {
           const linkRulesContainer = getPhoneRulesContainer();
           const { resources: rules } = await linkRulesContainer.items
             .query({
-              query: 'SELECT * FROM c WHERE c.phone = @phone AND c.link_future = true',
-              parameters: [{ name: '@phone', value: phone }]
+              query: "SELECT * FROM c WHERE c.phone = @phone AND c.link_future = true",
+              parameters: [{ name: "@phone", value: rawPhone }]
             })
             .fetchAll();
 
-          if (Array.isArray(rules) && rules.length > 0) {
-            patient_id = rules[0]?.patient_id || null;
-
-            if (patient_id) {
+          if (rules.length > 0) {
+            const rule = rules[0];
+            patient_id = rule.patient_id;
+            console.log("There are a rule")
+            // 👇 Obtener snapshot del paciente
+            if (patient_id && patientsContainer) {
               try {
-                const patientsContainer = getPatientsContainer();
                 const { resource: patient } = await patientsContainer.item(patient_id, patient_id).read();
                 if (patient) {
                   linked_patient_snapshot = {
                     id: patient.id,
-                    Name: patient.Name || '',
-                    DOB: patient.DOB || '',
-                    Address: patient.Address || '',
-                    Location: patient.Location || ''
+                    Name: patient.Name || "",
+                    DOB: patient.DOB || "",
+                    Address: patient.Address || "",
+                    Location: patient.Location || ""
                   };
                 }
               } catch (e) {
-                context.log(`Could not fetch patient snapshot: ${e.message}`);
+                context.log(`Could not fetch patient: ${e.message}`);
               }
             }
           }
+          console.log("No patient for phone ", rawPhone)
         }
       } catch (e) {
         context.log(`Phone link check failed: ${e.message}`);
@@ -121,6 +124,8 @@ app.http('cosmoInsertForm', {
         call_reason: form.call_reason,
         assigned_department,
         timestamp: createdAt,
+        patient_id,
+        linked_patient_snapshot,
         notes: [
           {
             datetime: createdAt,
@@ -134,8 +139,8 @@ app.http('cosmoInsertForm', {
       };
 
       // Solo añade los campos si encontramos relación
-      if (patient_id) newTicket.patient_id = patient_id;
-      if (linked_patient_snapshot) newTicket.linked_patient_snapshot = linked_patient_snapshot;
+      //if (patient_id) newTicket.patient_id = patient_id;
+      //if (linked_patient_snapshot) newTicket.linked_patient_snapshot = linked_patient_snapshot;
 
       // 7) Insertar en Cosmos
       try {
