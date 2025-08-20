@@ -17,7 +17,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const MIAMI_TZ = 'America/New_York';
-const signalRUrl = process.env.SIGNALR_BROADCAST_URL;
+const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
 
 app.http('cosmoInsertForm', {
   route: 'cosmoInsertForm',
@@ -92,18 +92,20 @@ app.http('cosmoInsertForm', {
         return error('DB Insert error', 500, e.message);
       }
 
-      // 7) Notificar (best-effort)
-      /*if (signalRUrl) {
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newTicket),
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
-      }*/
+      try {
+          fetch(signalRUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                    hub: 'ticketshubchannels',
+                    groupName: `department:Referrals`, //same way in frontend
+                    target: 'ticketCreated',
+                    payload: newTicket           
+                  })
+            });
+          } catch (e) {
+            console.warn('SignalR notify failed:', e.message);
+          }
 
       // 8) Respuesta
       return success('Ticket created', { ticketId }, 201);
