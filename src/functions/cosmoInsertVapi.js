@@ -107,11 +107,11 @@ app.http('cosmoInsertVapi', {
       return badRequest('Invalid JSON');
     }
 
-    if (!body?.message?.analysis?.structuredData?.summary) {
+    if (!body?.summary) {
       return badRequest('Missing summary');
     }
 
-    const summary = body.message.analysis.summary;
+    const summary = body.summary;
 
     let aiClassification = {
       priority: "normal",
@@ -156,8 +156,8 @@ app.http('cosmoInsertVapi', {
       context.log(`OpenAI classify error: ${err.message}`);
     }
 
-    const rawCreatedAt = body.message.call?.createdAt;
-    let createdAt;
+    const rawCreatedAt = body.createdAt || new Date();
+    let createdAt; 
     try {
       createdAt = rawCreatedAt && dayjs(rawCreatedAt).isValid()
         ? dayjs(rawCreatedAt).utc().toISOString()
@@ -168,7 +168,7 @@ app.http('cosmoInsertVapi', {
 
     const creation_date = dayjs(createdAt).tz(MIAMI_TZ).format('MM/DD/YYYY, HH:mm');
     const ticketId = crypto.randomUUID();
-    const phone = body.message.call?.customer?.number;
+    const phone = body.phone_number;
 
     let patient_id = null;
     let linked_patient_snapshot = {};
@@ -205,27 +205,30 @@ app.http('cosmoInsertVapi', {
       }
     }
 
+    const cost = body.cost || 0;
+    const call_duration = body.call_duration || 0;
+
     const itemToInsert = {
       tickets: ticketId,
       id: ticketId,
       summary,
-      call_reason: body.message.analysis.structuredData?.razon_llamada,
+      call_reason: body.call_reason,
       createdAt,
       creation_date,
-      patient_name: body.message.analysis.structuredData?.nombreapellido_paciente,
-      patient_dob: body.message.analysis.structuredData?.fechanacimiento_paciente,
-      caller_name: body.message.analysis.structuredData?.nombreapellidos_familiar,
-      callback_number: body.message.analysis.structuredData?.numero_alternativo,
+      patient_name: body.patient_name,
+      patient_dob: body.patient_date_of_birth,
+      caller_name: body.caller_name,
+      callback_number: body.phone_number,
       phone,
       patient_id: patient_id,
       linked_patient_snapshot,
-      url_audio: body.message.stereoRecordingUrl,
-      caller_id: body.message.phoneNumber?.name,
-      call_cost: body.message.cost,
-      assigned_department: body.message.analysis.structuredData?.vapi_assignment,
-      assigned_role: body.message.analysis.structuredData?.assigned_role,
-      caller_type: body.message.analysis.structuredData?.llamada,
-      call_duration: body.message.durationSeconds,
+      url_audio: body.url_audio,
+      caller_id: null,
+      call_cost: cost,
+      assigned_department: "Referrals",
+      //assigned_role: body.message.analysis.structuredData?.assigned_role,
+      //caller_type: body.message.analysis.structuredData?.llamada,
+      call_duration: call_duration,
       status: 'New',
       quality_control: false,
       agent_assigned: '',
@@ -239,6 +242,7 @@ app.http('cosmoInsertVapi', {
     };
 
     batchQueue.push(itemToInsert);
-    return success('Ticket received and queued for batch insert', { ticketId, aiClassification, patient_id, linked_patient_snapshot });
+    //return success('Ticket received and queued for batch insert', { ticketId, aiClassification, patient_id, linked_patient_snapshot });
+    return success(itemToInsert);
   }
 });
