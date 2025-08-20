@@ -205,7 +205,7 @@ app.http('cosmoInsertVapi', {
       }
     }
 
-    const cost = body.cost || 0;
+    const cost = body.call_cost || 0;
     const call_duration = body.call_duration || 0;
 
     const itemToInsert = {
@@ -218,7 +218,7 @@ app.http('cosmoInsertVapi', {
       patient_name: body.patient_name,
       patient_dob: body.patient_date_of_birth,
       caller_name: body.caller_name,
-      callback_number: body.phone_number,
+      callback_number: body.callback_number,
       phone,
       patient_id: patient_id,
       linked_patient_snapshot,
