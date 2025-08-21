@@ -47,12 +47,7 @@ app.http('cosmoGetByIds', {
       // Construir IN dinámico
       const inClause = ticketIds.map((_, i) => `@id${i}`).join(', ');
       const query = `
-        SELECT c.id, c.summary, c.tickets, c.call_reason, c.creation_date, c.patient_name,
-               c.patient_dob, c.caller_name, c.callback_number, c.caller_id,
-               c.call_cost, c.notes, c.collaborators, c.url_audio, c.assigned_department,
-               c.assigned_role, c.caller_type, c.call_duration, c.status, c.agent_assigned,
-               c.tiket_source, c.phone, c.work_time, c.aiClassification, c.createdAt,
-               c.patient_id, c.linked_patient_snapshot, c.quality_control
+        SELECT *
         FROM c
         WHERE c.id IN (${inClause})
       `;
