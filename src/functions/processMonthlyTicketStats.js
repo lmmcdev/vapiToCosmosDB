@@ -1,19 +1,22 @@
 // src/functions/processMonthlyTicketStats/index.js (CommonJS)
-const fetch = require('node-fetch'); // NEW: usado para SignalR
+const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const tz = require('dayjs/plugin/timezone');
+dayjs.extend(utc);
+dayjs.extend(tz);
+
 const { getContainer } = require('../shared/cosmoClient');
 const { getStatsContainer } = require('../shared/cosmoStatsClient');
 
-// (Opcional) si tu DTO mensual está en el mismo archivo que el diario, puedes exportar un validador.
-// Aquí solo seguimos el “formato nuevo”: añadimos statusCounts igual que el diario.
 const {
-  ALLOWED_STATUSES: DTO_ALLOWED_STATUSES,     // si tu dto exporta esta constante
-  MonthlyStatsOutput,                          // si tienes un schema para validar (opcional)
+  ALLOWED_STATUSES: DTO_ALLOWED_STATUSES,
+  MonthlyStatsOutput,
 } = (() => {
   try { return require('./dtos/stats.dto'); } catch { return {}; }
 })();
 
-// NEW: lista de estados a consolidar (como el endpoint diario)
 const ALLOWED_STATUSES = DTO_ALLOWED_STATUSES || [
   'New',
   'In Progress',
@@ -23,15 +26,36 @@ const ALLOWED_STATUSES = DTO_ALLOWED_STATUSES || [
   'Duplicated',
 ];
 
+const STATUS_ALIASES = {
+  'new': 'New',
+  'in progress': 'In Progress',
+  'in_progress': 'In Progress',
+  'in-progress': 'In Progress',
+  'pending': 'Pending',
+  'done': 'Done',
+  'emergency': 'Emergency',
+  'duplicated': 'Duplicated',
+};
+
+const MIAMI_TZ = 'America/New_York';
 const signalrMonthlyStats = process.env.SIGNAL_BROADCAST_URL_MONTHLY;
 
-// Helpers
-function startOfMonth(d = new Date()) { return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0); }
-function endOfMonth(d = new Date())   { return new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0, 0); }
-function yyyymm(d = new Date())       { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
-function yyyy_mm_dd(d = new Date())   { return d.toISOString().slice(0, 10); }
+// Helpers de fechas
+function yyyymm(d) { return `${d.year()}-${String(d.month() + 1).padStart(2, '0')}`; }
+function yyyy_mm_dd(d) { return d.format('YYYY-MM-DD'); }
+function startOfMonthMiami(d) { return d.startOf('month'); }
+function prevMonthStartEndMiami(nowMiami) {
+  const startPrev = nowMiami.subtract(1, 'month').startOf('month');
+  const endPrev   = nowMiami.startOf('month'); // inicio del mes actual
+  return { startPrev, endPrev };
+}
 
-// NEW: misma forma de consolidar que en el endpoint diario (incluye statusCounts)
+function normalizeStatus(s) {
+  if (!s) return null;
+  const key = String(s).trim().toLowerCase();
+  return STATUS_ALIASES[key] || null;
+}
+
 function aggregateMonthly(tickets) {
   let globalTotalTime = 0;
   let resolvedCount = 0;
@@ -44,19 +68,20 @@ function aggregateMonthly(tickets) {
   const statusCounts = ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {});
 
   for (const t of tickets) {
+    // conteo por día (si tienes createdAt en ISO Miami/UTC da igual para el histograma simple)
     const created = t?.createdAt ? new Date(t.createdAt) : null;
     if (created && !isNaN(created)) {
-      const day = yyyy_mm_dd(created);
+      const day = created.toISOString().slice(0, 10); // YYYY-MM-DD (vale para histograma)
       dailyMap[day] = (dailyMap[day] || 0) + 1;
     }
 
-    // NEW: conteo de estados mensual
-    const st = t?.status;
+    // estados normalizados
+    const st = normalizeStatus(t?.status);
     if (st && Object.prototype.hasOwnProperty.call(statusCounts, st)) {
       statusCounts[st] += 1;
     }
 
-    // tiempos de resolución
+    // tiempos de resolución (si existe closedAt)
     const closed = t?.closedAt ? new Date(t.closedAt) : null;
     if (created && closed && !isNaN(closed)) {
       const diffMins = Math.floor((closed - created) / 60000);
@@ -76,19 +101,22 @@ function aggregateMonthly(tickets) {
       const { priority, risk, category } = t.aiClassification;
 
       if (priority) {
-        if (!priorityMap[priority]) priorityMap[priority] = { count: 0, ticketIds: [] };
-        priorityMap[priority].count += 1;
-        priorityMap[priority].ticketIds.push(t.id);
+        const p = String(priority);
+        if (!priorityMap[p]) priorityMap[p] = { count: 0, ticketIds: [] };
+        priorityMap[p].count += 1;
+        if (t.id) priorityMap[p].ticketIds.push(t.id);
       }
       if (risk) {
-        if (!riskMap[risk]) riskMap[risk] = { count: 0, ticketIds: [] };
-        riskMap[risk].count += 1;
-        riskMap[risk].ticketIds.push(t.id);
+        const r = String(risk);
+        if (!riskMap[r]) riskMap[r] = { count: 0, ticketIds: [] };
+        riskMap[r].count += 1;
+        if (t.id) riskMap[r].ticketIds.push(t.id);
       }
       if (category) {
-        if (!categoryMap[category]) categoryMap[category] = { count: 0, ticketIds: [] };
-        categoryMap[category].count += 1;
-        categoryMap[category].ticketIds.push(t.id);
+        const c = String(category);
+        if (!categoryMap[c]) categoryMap[c] = { count: 0, ticketIds: [] };
+        categoryMap[c].count += 1;
+        if (t.id) categoryMap[c].ticketIds.push(t.id);
       }
     }
   }
@@ -108,51 +136,59 @@ function aggregateMonthly(tickets) {
     resolvedCount,
   };
 
+  const total = Object.values(statusCounts).reduce((s, n) => s + (n || 0), 0);
+  const statusCountsWithTotal = { ...statusCounts, Total: total };
+
   const aiClassificationStats = {
     priority: priorityMap,
     risk: riskMap,
     category: categoryMap,
   };
 
-  return { agentStats, dailyBreakdown, globalStats, statusCounts, aiClassificationStats };
+  return { agentStats, dailyBreakdown, globalStats, statusCounts: statusCountsWithTotal, aiClassificationStats };
 }
 
 app.timer('processMonthlyTicketStats', {
-  // Todos los días a las 00:10
+  // Todos los días a las 00:10 Miami
   schedule: '0 10 0 * * *',
   handler: async (_timer, context) => {
     try {
       const ticketContainer = getContainer();
       const statsContainer  = getStatsContainer();
 
-      const now = new Date();
+      const nowMiami = dayjs().tz(MIAMI_TZ);
 
-      // A) MTD (mes en curso): upsert incremental con mismo ID
+      // ---------- A) MTD (mes en curso): upsert incremental con mismo ID ----------
       {
-        const from = startOfMonth(now);
+        const mm = nowMiami.format('MM');      // "08"
+        const yyyy = nowMiami.format('YYYY');  // "2025"
+
+        // Filtra por mes y año en creation_date (seguro para TZ/DST):
+        // STARTSWITH -> "MM/", CONTAINS -> "/YYYY"
         const { resources: ticketsMTD } = await ticketContainer.items
           .query({
-            query: 'SELECT * FROM c WHERE c.createdAt >= @from',
-            parameters: [{ name: '@from', value: from.toISOString() }],
+            query: `
+              SELECT * FROM c
+              WHERE STARTSWITH(c.creation_date, @mmSlash)
+                AND CONTAINS(c.creation_date, @slashYYYY)
+            `,
+            parameters: [
+              { name: '@mmSlash', value: `${mm}/` },
+              { name: '@slashYYYY', value: `/${yyyy}` },
+            ],
           })
           .fetchAll();
 
-        const { agentStats, dailyBreakdown, globalStats, statusCounts, aiClassificationStats } =
-          aggregateMonthly(ticketsMTD);
+        const agg = aggregateMonthly(ticketsMTD);
 
-        const idMTD = `month-${yyyymm(now)}`;                // mismo id cada día
+        const idMTD = `month-${yyyymm(nowMiami)}`; // p.ej. "month-2025-08"
         const docMTD = {
           id: idMTD,
-          date: yyyy_mm_dd(now),
-          scope: 'month-to-date',                            // NEW: marca de alcance
-          agentStats,
-          globalStats,
-          dailyBreakdown,
-          statusCounts,                                      // NEW: en formato nuevo
-          aiClassificationStats,
+          date: yyyy_mm_dd(nowMiami),
+          scope: 'month-to-date',
+          ...agg,
         };
 
-        // (Opcional) valida con DTO si lo tienes
         if (MonthlyStatsOutput) {
           const { error: dtoErr } = MonthlyStatsOutput.validate(docMTD, { abortEarly: false });
           if (dtoErr) context.log.error('MTD DTO validation:', dtoErr.details);
@@ -175,34 +211,35 @@ app.timer('processMonthlyTicketStats', {
         }
       }
 
-      // B) Cierre de mes: el primer día del mes a las 00:10 cerramos el mes anterior
-      if (now.getDate() === 1) {
-        const prevMonthEnd   = startOfMonth(now);           // 00:00 del mes actual
-        const prevMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      // ---------- B) Cierre de mes: el 1º del mes a las 00:10, cerramos el mes anterior ----------
+      if (nowMiami.date() === 1) {
+        const { startPrev } = prevMonthStartEndMiami(nowMiami); // inicio del mes anterior en Miami
+
+        const mmPrev = startPrev.format('MM');
+        const yyyyPrev = startPrev.format('YYYY');
 
         const { resources: ticketsPrev } = await ticketContainer.items
           .query({
-            query: 'SELECT * FROM c WHERE c.createdAt >= @from AND c.createdAt < @to',
+            query: `
+              SELECT * FROM c
+              WHERE STARTSWITH(c.creation_date, @mmSlash)
+                AND CONTAINS(c.creation_date, @slashYYYY)
+            `,
             parameters: [
-              { name: '@from', value: prevMonthStart.toISOString() },
-              { name: '@to', value: prevMonthEnd.toISOString() },
+              { name: '@mmSlash', value: `${mmPrev}/` },
+              { name: '@slashYYYY', value: `/${yyyyPrev}` },
             ],
           })
           .fetchAll();
 
-        const { agentStats, dailyBreakdown, globalStats, statusCounts, aiClassificationStats } =
-          aggregateMonthly(ticketsPrev);
+        const aggFinal = aggregateMonthly(ticketsPrev);
 
-        const idFinal = `month-${yyyymm(prevMonthStart)}-final`; // NEW: doc inmutable de cierre
+        const idFinal = `month-${yyyymm(startPrev)}-final`; // "month-2025-07-final"
         const docFinal = {
           id: idFinal,
-          date: yyyy_mm_dd(prevMonthEnd),                   // fecha de cierre (inicio del mes actual)
+          date: yyyy_mm_dd(nowMiami), // fecha de cierre (inicio mes actual en Miami)
           scope: 'final',
-          agentStats,
-          globalStats,
-          dailyBreakdown,
-          statusCounts,                                     // NEW: en formato nuevo
-          aiClassificationStats,
+          ...aggFinal,
         };
 
         if (MonthlyStatsOutput) {
