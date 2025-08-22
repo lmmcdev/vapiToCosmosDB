@@ -1,6 +1,7 @@
 // CommonJS (Node/Functions v4 estilo app.http)
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
+const { getQCContainer } = require('../shared/cosmoQCEvaluations')
 const { success, error, badRequest, notFound } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 
@@ -8,7 +9,7 @@ const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims } = require('./auth/auth.helper');
-const { getMiamiNow } = require('./helpers/timeHelper')
+const { getMiamiNow } = require('./helpers/timeHelper');
 
 // DTO
 const { upsertQcInput } = require('./dtos/qc.dto');
@@ -26,8 +27,9 @@ app.http('cosmoUpsertQuality', {
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
-      //date iso dates
-      const { dateISO: miamiISO, dateDisplay: miamiDisplay } = getMiamiNow();
+      // Miami timestamps
+      const { dateISO: miamiISO } = getMiamiNow();
+
       // 1) Actor
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
@@ -55,6 +57,7 @@ app.http('cosmoUpsertQuality', {
 
       // 4) Leer ticket
       const container = getContainer();
+
       const item = container.item(ticketId, ticketId);
       let existing;
       try {
@@ -106,15 +109,13 @@ app.http('cosmoUpsertQuality', {
         score,
       };
 
-      // 6) Patch: asegurar nodo qc, inicializar/migrar history y hacer append; agregar nota
+      // 6) Patch QC en el ticket
       const patchOps = [];
 
-      // Asegurar nodo /qc
       if (!existing.qc) {
         patchOps.push({ op: 'add', path: '/qc', value: { ...qcSummary, history: [] } });
       }
 
-      // Migración desde formato legacy (qc sin history): sembrar snapshot
       const hasHistory = Array.isArray(existing?.qc?.history);
       if (!hasHistory) {
         if (existing?.qc && Object.keys(existing.qc).length > 0) {
@@ -133,10 +134,9 @@ app.http('cosmoUpsertQuality', {
         }
       }
 
-      // Append nueva evaluación
       patchOps.push({ op: 'add', path: '/qc/history/-', value: evaluationEntry });
 
-      // Actualizar resumen (sin tocar history)
+      // Resumen fields
       if (existing?.qc?.status !== undefined) {
         patchOps.push({ op: 'replace', path: '/qc/status', value: qcSummary.status });
       } else {
@@ -161,7 +161,6 @@ app.http('cosmoUpsertQuality', {
         patchOps.push({ op: 'add', path: '/qc/updatedAt', value: qcSummary.updatedAt });
       }
 
-      // Asegurar /notes y agregar nota
       if (!Array.isArray(existing.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
@@ -175,7 +174,7 @@ app.http('cosmoUpsertQuality', {
       };
       patchOps.push({ op: 'add', path: '/notes/-', value: noteValue });
 
-      // Enviar patch
+      // Ejecutar patch
       let sessionToken;
       try {
         const patchRes = await item.patch(patchOps);
@@ -184,21 +183,19 @@ app.http('cosmoUpsertQuality', {
         return error('Failed to upsert QC', 500, e.message);
       }
 
-      // 7) Releer usando Session Token (read-your-writes)
+      // 7) Releer con session token
       try {
         const readOpts = sessionToken ? { sessionToken } : { consistencyLevel: 'Strong' };
         ({ resource: existing } = await item.read(readOpts));
       } catch (e) {
-        context.log('⚠️ Read after patch failed, will fallback merge for response:', e.message);
+        context.log('⚠️ Read after patch failed, fallback merge:', e.message);
       }
 
-      // 8) Fallback: asegurar que la respuesta **incluye** qc y la entrada de historial recién agregada
+      // 8) Fallback merge
       if (!existing.qc) {
         existing.qc = { ...qcSummary, history: [evaluationEntry] };
       } else {
-        // asegurar resumen actualizado
         existing.qc = { ...existing.qc, ...qcSummary };
-        // asegurar history como array y que incluya la nueva entrada
         if (!Array.isArray(existing.qc.history)) existing.qc.history = [];
         const dup = existing.qc.history.find(e =>
           e?.createdAt === evaluationEntry.createdAt &&
@@ -209,7 +206,6 @@ app.http('cosmoUpsertQuality', {
         if (!dup) existing.qc.history = [...existing.qc.history, evaluationEntry];
       }
 
-      // Asegurar notes en la respuesta (sin duplicados obvios)
       if (!Array.isArray(existing.notes)) {
         existing.notes = [noteValue];
       } else {
@@ -221,7 +217,25 @@ app.http('cosmoUpsertQuality', {
         if (!dupNote) existing.notes = [...existing.notes, noteValue];
       }
 
-      // 9) Formatear salida (y asegurar qc también en dto)
+      // 9) Insertar en colección qc_evaluations (para métricas)
+      try {
+        const evalContainer = getQCContainer(); // asegúrate de tenerla creada con partitionKey: /reviewer_email
+        await evalContainer.items.create({
+          id: `${ticketId}_${miamiISO}`,
+          ticketId,
+          createdAt: miamiISO,
+          reviewer_email: actor_email,
+          agent_email: existing.agent_assigned || null,
+          status: nextStatus,
+          outcome: outcome || null,
+          score,
+          rubric: evaluationEntry.rubric || null,
+        }, { partitionKey: actor_email });
+      } catch (err) {
+        context.log('⚠️ Failed to insert qc_evaluations:', err.message);
+      }
+
+      // 10) Formatear salida
       let dto;
       try {
         dto = validateAndFormatTicket(existing, badRequest, context);
