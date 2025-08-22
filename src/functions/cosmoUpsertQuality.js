@@ -8,6 +8,7 @@ const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims } = require('./auth/auth.helper');
+const { getMiamiNow } = require('./helpers/timeHelper')
 
 // DTO
 const { upsertQcInput } = require('./dtos/qc.dto');
@@ -25,6 +26,8 @@ app.http('cosmoUpsertQuality', {
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
+      //date iso dates
+      const { dateISO: miamiISO, dateDisplay: miamiDisplay } = getMiamiNow();
       // 1) Actor
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
@@ -61,7 +64,7 @@ app.http('cosmoUpsertQuality', {
       }
       if (!existing) return notFound('Ticket not found.');
 
-      // 5) Construir qc
+      // 5) Construir QC (resumen + historial)
       const ALLOWED_OUTCOMES = ['passed', 'failed', 'coaching_required'];
       const ALLOWED_STATUSES = ['pending', 'in_review', ...ALLOWED_OUTCOMES];
 
@@ -76,11 +79,12 @@ app.http('cosmoUpsertQuality', {
             .reduce((a, b) => a + b, 0)
         : (typeof existing?.qc?.score === 'number' ? existing.qc.score : 0);
 
-      const qcValue = {
-        ...(existing.qc || {}),
-        status: nextStatus,
+      // Entrada de historial (inmutable)
+      const evaluationEntry = {
+        createdAt: miamiISO,
         reviewer_email: actor_email,
-        updatedAt: nowIso,
+        status: nextStatus,
+        ...(outcome ? { outcome } : {}),
         ...(rubric ? {
           rubric: {
             compliance:    rubric.compliance ?? 0,
@@ -91,20 +95,76 @@ app.http('cosmoUpsertQuality', {
             comments:      rubric.comments ?? '',
           },
           score,
-        } : {}),
+        } : { score }),
       };
 
-      // 6) Patch + nota
+      // Resumen para lecturas rápidas
+      const qcSummary = {
+        status: nextStatus,
+        reviewer_email: actor_email,
+        updatedAt: miamiISO,
+        score,
+      };
+
+      // 6) Patch: asegurar nodo qc, inicializar/migrar history y hacer append; agregar nota
       const patchOps = [];
-      if (existing.qc) {
-        patchOps.push({ op: 'replace', path: '/qc', value: qcValue });
-      } else {
-        patchOps.push({ op: 'add', path: '/qc', value: qcValue });
+
+      // Asegurar nodo /qc
+      if (!existing.qc) {
+        patchOps.push({ op: 'add', path: '/qc', value: { ...qcSummary, history: [] } });
       }
+
+      // Migración desde formato legacy (qc sin history): sembrar snapshot
+      const hasHistory = Array.isArray(existing?.qc?.history);
+      if (!hasHistory) {
+        if (existing?.qc && Object.keys(existing.qc).length > 0) {
+          const legacyTsMs = existing?._ts ? existing._ts * 1000 : Date.now();
+          const legacySnapshot = {
+            createdAt: existing.qc.updatedAt || new Date(legacyTsMs).toISOString(),
+            reviewer_email: existing.qc.reviewer_email || null,
+            status: existing.qc.status || 'in_review',
+            score: typeof existing.qc.score === 'number' ? existing.qc.score : 0,
+            ...(existing.qc.rubric ? { rubric: existing.qc.rubric } : {}),
+            migratedFromLegacy: true,
+          };
+          patchOps.push({ op: 'add', path: '/qc/history', value: [legacySnapshot] });
+        } else {
+          patchOps.push({ op: 'add', path: '/qc/history', value: [] });
+        }
+      }
+
+      // Append nueva evaluación
+      patchOps.push({ op: 'add', path: '/qc/history/-', value: evaluationEntry });
+
+      // Actualizar resumen (sin tocar history)
+      if (existing?.qc?.status !== undefined) {
+        patchOps.push({ op: 'replace', path: '/qc/status', value: qcSummary.status });
+      } else {
+        patchOps.push({ op: 'add', path: '/qc/status', value: qcSummary.status });
+      }
+
+      if (existing?.qc?.reviewer_email !== undefined) {
+        patchOps.push({ op: 'replace', path: '/qc/reviewer_email', value: qcSummary.reviewer_email });
+      } else {
+        patchOps.push({ op: 'add', path: '/qc/reviewer_email', value: qcSummary.reviewer_email });
+      }
+
+      if (typeof existing?.qc?.score === 'number') {
+        patchOps.push({ op: 'replace', path: '/qc/score', value: qcSummary.score });
+      } else {
+        patchOps.push({ op: 'add', path: '/qc/score', value: qcSummary.score });
+      }
+
+      if (existing?.qc?.updatedAt !== undefined) {
+        patchOps.push({ op: 'replace', path: '/qc/updatedAt', value: qcSummary.updatedAt });
+      } else {
+        patchOps.push({ op: 'add', path: '/qc/updatedAt', value: qcSummary.updatedAt });
+      }
+
+      // Asegurar /notes y agregar nota
       if (!Array.isArray(existing.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
-
       const noteValue = {
         datetime: nowIso,
         event_type: 'system_log',
@@ -115,9 +175,9 @@ app.http('cosmoUpsertQuality', {
       };
       patchOps.push({ op: 'add', path: '/notes/-', value: noteValue });
 
+      // Enviar patch
       let sessionToken;
       try {
-        // ⬇️ capturamos headers del patch para leer con el mismo token de sesión
         const patchRes = await item.patch(patchOps);
         sessionToken = patchRes?.headers?.['x-ms-session-token'];
       } catch (e) {
@@ -129,28 +189,36 @@ app.http('cosmoUpsertQuality', {
         const readOpts = sessionToken ? { sessionToken } : { consistencyLevel: 'Strong' };
         ({ resource: existing } = await item.read(readOpts));
       } catch (e) {
-        // si falla la relectura, seguimos con fallback
         context.log('⚠️ Read after patch failed, will fallback merge for response:', e.message);
       }
 
-      // 8) Fallback: asegurar que la respuesta **incluye** qc y nota recién agregada
-      //    (en caso de que la relectura no refleje aún los cambios)
+      // 8) Fallback: asegurar que la respuesta **incluye** qc y la entrada de historial recién agregada
       if (!existing.qc) {
-        existing.qc = qcValue;
+        existing.qc = { ...qcSummary, history: [evaluationEntry] };
       } else {
-        // aseguramos que al menos el status/score más reciente está
-        existing.qc = { ...existing.qc, ...qcValue };
+        // asegurar resumen actualizado
+        existing.qc = { ...existing.qc, ...qcSummary };
+        // asegurar history como array y que incluya la nueva entrada
+        if (!Array.isArray(existing.qc.history)) existing.qc.history = [];
+        const dup = existing.qc.history.find(e =>
+          e?.createdAt === evaluationEntry.createdAt &&
+          e?.reviewer_email === evaluationEntry.reviewer_email &&
+          e?.status === evaluationEntry.status &&
+          (e?.score ?? null) === (evaluationEntry.score ?? null)
+        );
+        if (!dup) existing.qc.history = [...existing.qc.history, evaluationEntry];
       }
+
+      // Asegurar notes en la respuesta (sin duplicados obvios)
       if (!Array.isArray(existing.notes)) {
         existing.notes = [noteValue];
       } else {
-        // Evitar duplicar (heurística por timestamp/agent/event)
-        const dup = existing.notes.find(n =>
+        const dupNote = existing.notes.find(n =>
           n?.datetime === noteValue.datetime &&
           n?.agent_email === noteValue.agent_email &&
           n?.event === noteValue.event
         );
-        if (!dup) existing.notes = [...existing.notes, noteValue];
+        if (!dupNote) existing.notes = [...existing.notes, noteValue];
       }
 
       // 9) Formatear salida (y asegurar qc también en dto)
@@ -160,7 +228,7 @@ app.http('cosmoUpsertQuality', {
       } catch (badReq) {
         return badReq;
       }
-      if (!dto.qc) dto.qc = qcValue; // cinturón y tirantes
+      if (!dto.qc) dto.qc = { ...qcSummary, history: [evaluationEntry] };
 
       return success('QC review saved', dto);
     } catch (e) {
