@@ -94,9 +94,9 @@ app.http('searchTickets', {
     if (!query && !filter && Object.keys(filters).length === 0) {
       return badRequest('Provide at least a query or filters.');
     }
-    if (query === '*') {
+    /*if (query === '*') {
       return badRequest('Avoid using wildcard search (*).');
-    }
+    }*/
 
     const cleanedQuery = cleanQueryInput(query);
     const skip = (page - 1) * size;
