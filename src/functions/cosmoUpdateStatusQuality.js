@@ -8,6 +8,7 @@ const { success, badRequest, notFound, error } = require('../shared/responseUtil
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims } = require('./auth/auth.helper');
+const { getMiamiNow } = require('./helpers/timeHelper');
 
 // Grupo QUALITY
 const { QUALITY: { QUALITY_GROUP } } = GROUPS;
@@ -20,6 +21,8 @@ app.http('cosmoUpdateStatusQuality', {
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
+
       // 1) Claims del token
       const claims = context.user || {};
       const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
@@ -73,7 +76,7 @@ app.http('cosmoUpdateStatusQuality', {
         op: 'add',
         path: '/notes/-',
         value: {
-          datetime: new Date().toISOString(),
+          datetime: miamiUTC,
           event_type: 'system_log',
           agent_email,
           event: `Quality Control changed status: "${ticket.status || 'Unknown'}" → "${newStatus}"`
@@ -102,7 +105,7 @@ app.http('cosmoUpdateStatusQuality', {
           aiClassification: updated.aiClassification,
           quality_control: updated.quality_control,
           linked_patient_snapshot: updated.linked_patient_snapshot,
-          startDate: new Date().toISOString()
+          startDate: miamiUTC
         });
       } else {
         // Si no está en QC, intentamos eliminar su entrada

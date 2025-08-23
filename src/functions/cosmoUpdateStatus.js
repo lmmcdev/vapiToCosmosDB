@@ -6,6 +6,7 @@ const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updateTicketStatusInput } = require('./dtos/input.schema');
+const { getMiamiNow } = require('./helpers/timeHelper');
 
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
@@ -29,6 +30,8 @@ app.http('cosmoUpdateStatus', {
   authLevel: 'anonymous',
   handler: withAuth(async (request, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
+
       // 1) Actor desde el token
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
@@ -112,7 +115,7 @@ app.http('cosmoUpdateStatus', {
         patchOps.push({
           op: existing.closedAt ? 'replace' : 'add',
           path: '/closedAt',
-          value: new Date().toISOString(),
+          value: miamiUTC,
         });
       } else if (existing.status === 'Done' && existing.closedAt) {
         patchOps.push({ op: 'replace', path: '/closedAt', value: null });
@@ -122,7 +125,7 @@ app.http('cosmoUpdateStatus', {
         op: 'add',
         path: '/notes/-',
         value: {
-          datetime: new Date().toISOString(),
+          datetime: miamiUTC,
           event_type: 'system_log',
           agent_email: actor_email,
           event: `Status changed: "${existing.status}" → "${newStatus}"`,

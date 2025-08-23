@@ -4,6 +4,8 @@ const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+const { getMiamiNow } = require('./helpers/timeHelper');
+
 
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
@@ -28,6 +30,8 @@ app.http('assignAgent', {
   authLevel: 'anonymous',
   handler: withAuth(async (request, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
+
       const claims = context.user;
 
       // 1) Email del token (agente que hace la asignación)
@@ -90,7 +94,7 @@ app.http('assignAgent', {
         op: 'add',
         path: '/notes/-',
         value: {
-          datetime: new Date().toISOString(),
+          datetime: miamiUTC,
           event_type: 'system_log',
           agent_email,
           event: `Assigned agent to the ticket: ${target_agent_email}`,

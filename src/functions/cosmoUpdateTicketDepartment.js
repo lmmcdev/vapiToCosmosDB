@@ -6,6 +6,7 @@ const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updateTicketDepartmentInput } = require('./dtos/input.schema');
+const { getMiamiNow } = require('./helpers/timeHelper');
 
 // 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
@@ -27,6 +28,8 @@ app.http('cosmoUpdateTicketDepartment', {
   authLevel: 'anonymous',
   handler: withAuth(async (request, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
+
       // 1) Actor desde el token
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
@@ -106,7 +109,7 @@ app.http('cosmoUpdateTicketDepartment', {
         op: 'add',
         path: '/notes/-',
         value: {
-          datetime: new Date().toISOString(),
+          datetime: miamiUTC,
           event_type: 'system_log',
           agent_email: actor_email,
           event: `Department changed from "${existing.assigned_department || 'None'}" to "${newDepartment}" by ${changedBy}.`,

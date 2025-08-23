@@ -6,14 +6,8 @@ const { getContainer } = require('../shared/cosmoClient');
 const { getPhoneRulesContainer } = require('../shared/cosmoPhoneRulesClient');
 const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest } = require('../shared/responseUtils');
-const dayjs = require('dayjs');
-const utc = require('dayjs/plugin/utc');
-const timezone = require('dayjs/plugin/timezone');
+const { getMiamiNow } = require('./helpers/timeHelper');
 
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
 
 const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
@@ -34,29 +28,7 @@ let patientsContainer = null;
   patientsContainer = getPatientsContainer();
 })();
 
-// --- Util: interpretar fecha como MIAMI ---
-function parseAsMiami(raw) {
-  try {
-    if (raw == null) return dayjs().tz(MIAMI_TZ);
 
-    // epoch numérico
-    if (typeof raw === 'number' || /^\d+$/.test(String(raw))) {
-      return dayjs(Number(raw)).tz(MIAMI_TZ);
-    }
-
-    const s = String(raw);
-
-    // si ya trae zona (Z o ±HH:mm), respétala y conviértela a Miami
-    if (/[zZ]$|[+\-]\d{2}:\d{2}$/.test(s)) {
-      return dayjs(s).tz(MIAMI_TZ);
-    }
-
-    // si NO trae zona, interprétala como hora de Miami
-    return dayjs.tz(s, MIAMI_TZ);
-  } catch {
-    return dayjs().tz(MIAMI_TZ);
-  }
-}
 
 async function insertWithRetry(container, item, maxRetries = 5) {
   let attempts = 0;
@@ -160,9 +132,11 @@ app.http('cosmoInsertVapi', {
     }
 
     // --- FECHAS: ambas en hora de MIAMI ---
-    const miami = parseAsMiami(body.createdAt); // si no viene, ahora en Miami
-    const createdAt = miami.format('YYYY-MM-DDTHH:mm:ssZ');   // ISO con offset de Miami
-    const creation_date = miami.format('MM/DD/YYYY, HH:mm');  // UI
+          // Miami timestamps
+    const { dateISO: miamiISO } = getMiamiNow();
+    const { dateISO: miamiUTC } = getMiamiNow();
+    const createdAt = miamiISO; //campos para filtros
+    const creation_date = miamiUTC; //campo amigable UI
 
     const ticketId = crypto.randomUUID();
     const phone = body.phone_number;

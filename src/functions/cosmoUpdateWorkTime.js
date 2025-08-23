@@ -9,6 +9,7 @@ const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updateWorkTimeInput } = require('./dtos/input.schema');
+const { getMiamiNow } = require('./helpers/timeHelper');
 
 // 🔐 Auth
 const { withAuth } = require('./auth/withAuth');
@@ -16,8 +17,6 @@ const { getEmailFromClaims } = require('./auth/auth.helper');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
-
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 const lc = (s) => (s || '').toLowerCase();
 
@@ -27,6 +26,7 @@ app.http('cosmoUpdateWorkTime', {
   authLevel: 'anonymous',
   handler: withAuth(async (request, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
       // 0) Actor desde el token (cualquier usuario autenticado)
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
@@ -85,7 +85,7 @@ app.http('cosmoUpdateWorkTime', {
         op: 'add',
         path: '/notes/-',
         value: {
-          datetime: new Date().toISOString(),
+          datetime: miamiUTC,
           event_type: 'system_log',
           agent_email: actor_email,
           event: `${workTime} registered by agent: ${actor_email}`
@@ -123,19 +123,6 @@ app.http('cosmoUpdateWorkTime', {
         formattedDto = validateAndFormatTicket(existing, badRequest, context);
       } catch (badReq) {
         return badReq;
-      }
-
-      // 7) Notificar SignalR (best-effort)
-      try {
-        if (signalRUrl) {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto)
-          });
-        }
-      } catch (e) {
-        context.log('⚠️ SignalR failed:', e.message);
       }
 
       // 8) OK

@@ -2,9 +2,7 @@
 const { app } = require('@azure/functions');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
-const dayjs = require('dayjs');
-const utc = require('dayjs/plugin/utc');
-const timezone = require('dayjs/plugin/timezone');
+const { getMiamiNow } = require('./helpers/timeHelper');
 
 const { getContainer } = require('../shared/cosmoClient');
 const { getPhoneRulesContainer } = require('../shared/cosmoPhoneRulesClient');
@@ -16,10 +14,6 @@ const { success, error, badRequest } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
 const { getEmailFromClaims } = require('./auth/auth.helper');
 
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const MIAMI_TZ = 'America/New_York';
 const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
 
 const normalizePhone = (v = '') => (String(v).match(/\d/g) || []).join('');
@@ -30,6 +24,9 @@ app.http('cosmoInsertForm', {
   authLevel: 'anonymous', // se valida con withAuth + access_as_user
   handler: withAuth(async (request, context) => {
     try {
+      // Miami timestamps
+      const { dateISO: miamiISO } = getMiamiNow();
+      const { dateISO: miamiUTC } = getMiamiNow();
       // 1) Usuario desde el token
       const claims = context.user;
       const actorEmail = getEmailFromClaims(claims);
@@ -54,9 +51,8 @@ app.http('cosmoInsertForm', {
       }
 
       // 4) Fechas
-      const nowMiami = dayjs().tz(MIAMI_TZ);
-      const createdAt = nowMiami.utc().toISOString(); // ISO para filtros/queries
-      const creation_date = nowMiami.format('MM/DD/YYYY, HH:mm'); // amigable UI
+      const createdAt = miamiISO; //campos para filtros
+      const creation_date = miamiUTC; //campo amigable UI
       const ticketId = crypto.randomUUID();
 
       // 5) Detectar paciente por regla de teléfono

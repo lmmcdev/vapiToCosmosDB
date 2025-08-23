@@ -28,6 +28,7 @@ app.http('cosmoUpsertQuality', {
   handler: withAuth(async (req, context) => {
     try {
       // Miami timestamps
+      const { dateISO: miamiUTC } = getMiamiNow();
       const { dateISO: miamiISO } = getMiamiNow();
 
       // 1) Actor
@@ -75,7 +76,6 @@ app.http('cosmoUpsertQuality', {
       if (statusIn && ALLOWED_STATUSES.includes(statusIn)) nextStatus = statusIn;
       else if (outcome && ALLOWED_OUTCOMES.includes(outcome)) nextStatus = outcome;
 
-      const nowIso = new Date().toISOString();
       const score = rubric
         ? ['compliance','accuracy','process','softSkills','documentation']
             .map(k => Number(rubric?.[k] || 0))
@@ -119,9 +119,8 @@ app.http('cosmoUpsertQuality', {
       const hasHistory = Array.isArray(existing?.qc?.history);
       if (!hasHistory) {
         if (existing?.qc && Object.keys(existing.qc).length > 0) {
-          const legacyTsMs = existing?._ts ? existing._ts * 1000 : Date.now();
           const legacySnapshot = {
-            createdAt: existing.qc.updatedAt || new Date(legacyTsMs).toISOString(),
+            createdAt: existing.qc.updatedAt || miamiISO,
             reviewer_email: existing.qc.reviewer_email || null,
             status: existing.qc.status || 'in_review',
             score: typeof existing.qc.score === 'number' ? existing.qc.score : 0,
@@ -165,7 +164,7 @@ app.http('cosmoUpsertQuality', {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
       const noteValue = {
-        datetime: nowIso,
+        datetime: miamiUTC,
         event_type: 'system_log',
         agent_email: actor_email,
         event: rubric

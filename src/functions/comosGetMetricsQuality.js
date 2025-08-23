@@ -1,6 +1,5 @@
 // src/functions/cosmoGetQcMetrics.js
 const { app } = require('@azure/functions');
-const { getContainer } = require('../shared/cosmoClient');
 const { getQCContainer } = require('../shared/cosmoQCEvaluations');
 const { success, error } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
@@ -28,7 +27,7 @@ const DEFAULT_BINS = [
   { label: '11–15', min: 11, max: 15 },
 ];
 
-app.http('cosmoGetQcMetrics', {
+app.http('cosmoQcMetrics', {
   route: 'cosmoQcMetrics',
   methods: ['GET'],
   authLevel: 'anonymous',

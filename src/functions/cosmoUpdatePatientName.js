@@ -6,6 +6,8 @@ const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updatePatientNameInput } = require('./dtos/input.schema');
+const { getMiamiNow } = require('./helpers/timeHelper');
+
 
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
@@ -27,14 +29,14 @@ app.http('cosmoUpdatePatientName', {
   authLevel: 'anonymous',
   handler: withAuth(async (request, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
+
       // 1) Actor desde el token
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
       if (!actor_email) {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
-
-      console.log("Email", actor_email)
 
       // 2) Rol efectivo por grupos (supervisor/agent)
       const { role } = getRoleGroups(claims, {
@@ -44,8 +46,6 @@ app.http('cosmoUpdatePatientName', {
       if (!role) {
         return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
       }
-
-      console.log("role", role)
 
       // 3) Parse + valida input (DTO)
       let body;
@@ -112,7 +112,7 @@ app.http('cosmoUpdatePatientName', {
         op: 'add',
         path: '/notes/-',
         value: {
-          datetime: new Date().toISOString(),
+          datetime: miamiUTC,
           event_type: 'system_log',
           agent_email: actor_email,
           event: `Patient name changed from "${prevName}" to "${nuevo_nombreapellido}"`,

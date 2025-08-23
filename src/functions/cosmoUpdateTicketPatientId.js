@@ -6,6 +6,7 @@ const { getContainer } = require('../shared/cosmoClient');
 const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+const { getMiamiNow } = require('./helpers/timeHelper');
 
 // 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
@@ -19,20 +20,6 @@ const {
 } = GROUPS.REFERRALS;
 
 const patientsContainer = getPatientsContainer();
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
-
-async function notifySignalR(payload, context) {
-  if (!signalRUrl) return;
-  try {
-    await fetch(signalRUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    context.log('⚠️ SignalR failed:', e.message);
-  }
-}
 
 app.http('updateTicketsByPhone', {
   route: 'updateTicketsByPhone',
@@ -40,6 +27,7 @@ app.http('updateTicketsByPhone', {
   authLevel: 'anonymous',
   handler: withAuth(async (request, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
       // 1) Actor desde el token
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
@@ -149,7 +137,7 @@ app.http('updateTicketsByPhone', {
           op: 'add',
           path: '/notes/-',
           value: {
-            datetime: new Date().toISOString(),
+            datetime: miamiUTC,
             event_type: 'system_log',
             agent_email: actor_email,
             event: `Linked this ticket to patient_id: ${patient_id}`,
@@ -217,7 +205,7 @@ app.http('updateTicketsByPhone', {
               op: 'add',
               path: '/notes/-',
               value: {
-                datetime: new Date().toISOString(),
+                datetime: miamiUTC,
                 event_type: 'system_log',
                 agent_email: actor_email,
                 event: `Linked ticket to patient_id: ${patient_id}`,
@@ -251,7 +239,7 @@ app.http('updateTicketsByPhone', {
           patient_id,
           link_future: true,
           linked_patient_snapshot,
-          created_at: new Date().toISOString(),
+          created_at: miamiUTC,
           created_by: actor_email,
         });
 
@@ -302,7 +290,7 @@ app.http('updateTicketsByPhone', {
           op: 'add',
           path: '/notes/-',
           value: {
-            datetime: new Date().toISOString(),
+            datetime: miamiUTC,
             event_type: 'system_log',
             agent_email: actor_email,
             event: 'Unlinked ticket from patient_id',

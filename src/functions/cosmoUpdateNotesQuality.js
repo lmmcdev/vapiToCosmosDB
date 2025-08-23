@@ -7,17 +7,21 @@ const { success, badRequest, notFound, error } = require('../shared/responseUtil
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims } = require('./auth/auth.helper');
+const { getMiamiNow } = require('./helpers/timeHelper');
+
 
 // Grupo QUALITY (acceso exclusivo)
 const { QUALITY: { QUALITY_GROUP } } = GROUPS;
 
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+//const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('cosmoUpdateNotesQuality', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
+      const { dateISO: miamiUTC } = getMiamiNow();
+
       // 1) Claims: email y grupos desde el token
       const claims = context.user || {};
       const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
@@ -71,7 +75,7 @@ app.http('cosmoUpdateNotesQuality', {
             op: 'add',
             path: '/notes/-',
             value: {
-              datetime: n.datetime || new Date().toISOString(),
+              datetime: miamiUTC,
               event_type: 'quality_note',
               agent_email,         // del token
               event: n.event.trim()
@@ -84,7 +88,7 @@ app.http('cosmoUpdateNotesQuality', {
           op: 'add',
           path: '/notes/-',
           value: {
-            datetime: new Date().toISOString(),
+            datetime: miamiUTC,
             event_type: 'system_log',
             agent_email,
             event: `Added ${notes.length} quality note(s).`
@@ -97,7 +101,7 @@ app.http('cosmoUpdateNotesQuality', {
           op: 'add',
           path: '/notes/-',
           value: {
-            datetime: new Date().toISOString(),
+            datetime: miamiUTC,
             event_type: 'system_log',
             agent_email,
             event: event.trim()
@@ -143,7 +147,7 @@ app.http('cosmoUpdateNotesQuality', {
         linked_patient_snapshot: updated.linked_patient_snapshot
       };
 
-      try {
+      /*try {
         if (signalRUrl) {
           await fetch(signalRUrl, {
             method: 'POST',
@@ -153,7 +157,7 @@ app.http('cosmoUpdateNotesQuality', {
         }
       } catch (e) {
         context.log('⚠️ SignalR failed:', e.message);
-      }
+      }*/
 
       return success('Notes updated successfully.', { added: addedCount, ticket: responseData });
     } catch (err) {
