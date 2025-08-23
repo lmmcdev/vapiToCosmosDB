@@ -1,7 +1,7 @@
 // src/functions/cosmoGetQuality/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { getQAContainer } = require('../shared/cosmoQAClient');
-const { getContainer } = require('../shared/cosmoClient');           // ⬅️ ADD
+const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, error } = require('../shared/responseUtils');
 
 // Auth utils
@@ -9,7 +9,10 @@ const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims } = require('./auth/auth.helper');
 
-// ⚙️ Grupo permitido (Quality)
+// ✅ DTO helper tolerante (stripUnknown, convert, best-effort)
+const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
+
+// Grupo QUALITY
 const { QUALITY: { QUALITY_GROUP } } = GROUPS;
 
 // helper por si algún string viene vacío/undefined
@@ -20,16 +23,16 @@ app.http('cosmoGetQuality', {
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
-      // 1) Extraer claims del token
+      // 1) Claims
       const claims = context.user || {};
 
-      // 2) Email desde el token (preferred_username / upn / email)
+      // 2) Email
       const email = getEmailFromClaims(claims);
       if (!email) {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      // 3) Grupos del token
+      // 3) Grupo QUALITY
       const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
       if (!tokenGroups.includes(QUALITY_GROUP)) {
         return { status: 403, jsonBody: { error: 'Insufficient group membership (Quality only)' } };
@@ -37,51 +40,85 @@ app.http('cosmoGetQuality', {
 
       context.log(`QA list requested by ${email}. Groups: ${tokenGroups.join(', ')}`);
 
-      // 4) Consulta a Cosmos (QA)
+      // 4) Consulta a contenedor de QA (quality_control_tickets)
       const qaContainer = getQAContainer();
-      const { resources: tickets } = await qaContainer.items
+      const { resources: tickets = [] } = await qaContainer.items
         .query({ query: 'SELECT * FROM c' })
         .fetchAll();
 
-      // 5) Enriquecer con qc (desde el contenedor principal de tickets)
+      // 5) Enriquecer con el documento principal + DTO
       const mainContainer = getContainer();
+      const enriched = [];
 
-      const enriched = await Promise.all(
-        (tickets || []).map(async (t) => {
-          const id = t?.id || t?.tickets;  // por si en QA guardaste "tickets" como id lógico
-          if (!id) {
-            return {
-              ...t,
-              qc: null,
-              linked_patient_snapshot: t.linked_patient_snapshot || {}
-            };
-          }
+      for (const t of tickets) {
+        const id = t?.id || t?.ticketId || t?.tickets; // soporta variantes de snapshot
+        if (!id) {
+          // Sin id no podemos leer el principal; devolvemos snapshot con shape mínimo
+          // (no rompe, pero no tendrá DTO completo)
+          enriched.push({
+            // snapshot QA tal cual
+            ...t,
+            // shape compatible con el front
+            qc: null,
+            linked_patient_snapshot: t.linked_patient_snapshot || {},
+            // meta de lista
+            qc_list: {
+              startDate: t.startDate || null,
+              qc_status: t.qc_status || 'in_review',
+              agent_email: t.agent_email || null,
+            },
+          });
+          continue;
+        }
 
-          try {
-            const { resource: mainDoc } = await mainContainer.item(id, id).read();
-            const qcNode = mainDoc?.qc ?? null;
+        try {
+          const { resource: mainDoc } = await mainContainer.item(id, id).read();
 
-            // Usa el snapshot que venga del QA; si no existe, intenta el del doc principal; si no, {}
-            const linkedSnap =
-              t.linked_patient_snapshot ||
-              mainDoc?.linked_patient_snapshot ||
-              {};
+          // Base para DTO: si existe mainDoc, usamos ese; si no, el snapshot QA
+          const base = mainDoc || t;
 
-            return {
-              ...t,
-              qc: qcNode,
-              linked_patient_snapshot: linkedSnap
-            };
-          } catch (e) {
-            context.log(`⚠️ Failed to enrich QC for ticket ${id}: ${e.message}`);
-            return {
-              ...t,
-              qc: null,
-              linked_patient_snapshot: t.linked_patient_snapshot || {}
-            };
-          }
-        })
-      );
+          // 🧼 Formateo DTO tolerante (ignora extras, castea)
+          const dto = validateAndFormatTicket(base, badRequest, context, { strict: false });
+
+          // Fallback de snapshot enlazado:
+          // - preferimos el snapshot del QA (más fresco para la grilla)
+          // - si no, el del documento principal
+          // - si nada, {}
+          const linkedSnap =
+            t.linked_patient_snapshot ||
+            dto.linked_patient_snapshot ||
+            {};
+
+          // Adjuntamos campos auxiliares que no están en el DTO:
+          const final = {
+            ...dto,
+            qc: mainDoc?.qc ?? null, // qc del ticket principal (puede ser null)
+            linked_patient_snapshot: linkedSnap,
+            qc_list: {
+              startDate: t.startDate || null,
+              qc_status: t.qc_status || 'in_review',
+              agent_email: t.agent_email || null,
+            },
+          };
+
+          enriched.push(final);
+        } catch (e) {
+          context.log(`⚠️ Failed to enrich QC for ticket ${id}: ${e.message}`);
+
+          // Si falla la lectura del principal, devolvemos algo razonable con snapshot QA
+          const minimal = validateAndFormatTicket(t || { id }, badRequest, context, { strict: false });
+          enriched.push({
+            ...minimal,
+            qc: null,
+            linked_patient_snapshot: t?.linked_patient_snapshot || {},
+            qc_list: {
+              startDate: t?.startDate || null,
+              qc_status: t?.qc_status || 'in_review',
+              agent_email: t?.agent_email || null,
+            },
+          });
+        }
+      }
 
       // 6) Respuesta
       return success(enriched);
