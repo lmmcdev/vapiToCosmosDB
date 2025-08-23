@@ -21,7 +21,7 @@ const {
   AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
 } = GROUPS.REFERRALS;
 
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+//const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('cosmoUpdateNotes', {
   route: 'cosmoUpdateNotes',
@@ -155,7 +155,7 @@ app.http('cosmoUpdateNotes', {
       }
 
       // 9) Notificar via SignalR (best-effort)
-      if (signalRUrl) {
+      /*if (signalRUrl) {
         try {
           await fetch(signalRUrl, {
             method: 'POST',
@@ -165,7 +165,7 @@ app.http('cosmoUpdateNotes', {
         } catch (e) {
           context.log('⚠️ SignalR failed:', e.message);
         }
-      }
+      }*/
 
       // 10) Respuesta final (ticket completo)
       return success('Operation successfull', formattedDto);

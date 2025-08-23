@@ -142,7 +142,7 @@ app.http('cosmoUpdatePatientName', {
       }
 
       // 10) SignalR (best-effort)
-      if (signalRUrl) {
+      /*if (signalRUrl) {
         try {
           await fetch(signalRUrl, {
             method: 'POST',
@@ -152,7 +152,7 @@ app.http('cosmoUpdatePatientName', {
         } catch (e) {
           context.log('⚠️ SignalR failed:', e.message);
         }
-      }
+      }*/
 
       // 11) Respuesta final (ticket completo)
       return success('Operation successfull', formattedDto);

@@ -22,7 +22,7 @@ const {
   //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
 } = GROUPS.REFERRALS;
 
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+//const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('assignAgent', {
   route: 'assignAgent',
@@ -118,7 +118,7 @@ app.http('assignAgent', {
       }
 
       // 9) Notifica SignalR (best-effort)
-      if (signalRUrl) {
+      /*if (signalRUrl) {
         try {
           await fetch(signalRUrl, {
             method: 'POST',
@@ -128,7 +128,7 @@ app.http('assignAgent', {
         } catch (e) {
           context.log('⚠️ SignalR failed:', e.message);
         }
-      }
+      }*/
 
       // 10) Respuesta OK
       return success('Status updated successfully.', formattedDto);

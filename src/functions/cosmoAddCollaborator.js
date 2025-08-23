@@ -19,7 +19,7 @@ const {
   AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si luego permites agentes
 } = GROUPS.REFERRALS;
 
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+//const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 
 const lc = (s) => (s || '').toLowerCase();

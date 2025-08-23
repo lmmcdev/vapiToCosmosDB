@@ -128,7 +128,7 @@ app.http('cosmoUpdatePatientBOD', { // 👈 conservamos el nombre del endpoint t
       }
 
       // 9) Notificar via SignalR (best-effort)
-      if (signalRUrl) {
+      /*if (signalRUrl) {
         try {
           await fetch(signalRUrl, {
             method: 'POST',
@@ -138,7 +138,7 @@ app.http('cosmoUpdatePatientBOD', { // 👈 conservamos el nombre del endpoint t
         } catch (e) {
           context.log('⚠️ SignalR failed:', e.message);
         }
-      }
+      }*/
 
       // 10) Responder ticket completo
       return success('Operation successfull', formattedDto);

@@ -20,9 +20,9 @@ const {
   AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
 } = GROUPS.REFERRALS;
 
-const signalRUrl      = process.env.SIGNAL_BROADCAST_URL2;
-theStatusUrl = process.env.SIGNAL_BROADCAST_URL3;
-const signalRClosed   = process.env.SIGNAL_BROADCAST_URL4;
+//const signalRUrl      = process.env.SIGNAL_BROADCAST_URL2;
+//const theStatusUrl    = process.env.SIGNAL_BROADCAST_URL3;
+//const signalRClosed   = process.env.SIGNAL_BROADCAST_URL4;
 
 app.http('cosmoUpdateStatus', {
   route: 'cosmoUpdateStatus',
@@ -149,7 +149,7 @@ app.http('cosmoUpdateStatus', {
       }
 
       // 11) Notificar SignalR (best-effort)
-      const notifyUrls = [signalRUrl, theStatusUrl].filter(Boolean);
+      /*const notifyUrls = [signalRUrl, theStatusUrl].filter(Boolean);
       for (const url of notifyUrls) {
         try {
           await fetch(url, {
@@ -160,7 +160,7 @@ app.http('cosmoUpdateStatus', {
         } catch (e) {
           context.log(`⚠️ SignalR failed for ${url}:`, e.message);
         }
-      }
+      }*/
 
       /*if ((existing.status === 'Done' || newStatus === 'Done') && signalRClosed) {
         try {
