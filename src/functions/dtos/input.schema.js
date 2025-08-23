@@ -126,6 +126,17 @@ const searchBodySchema = Joi.object({
   filter: Joi.string().optional()
 });
 
+const getByIdsInput = Joi.object({
+  ticketIds: Joi.array()
+    .items(Joi.string().uuid().required())
+    .min(1)
+    .required()
+    .label('ticketIds'),
+  continuationToken: Joi.string().allow('', null).optional(),
+  limit: Joi.number().integer().min(1).max(200).default(10),
+});
+
+
 
 
 module.exports = {
@@ -139,5 +150,6 @@ module.exports = {
   updateTicketDepartmentInput,
   BASE_STATUSES, SUPERVISOR_STATUSES,
   updateTicketCollaboratorsInput,
-  searchBodySchema
+  searchBodySchema,
+  getByIdsInput
 };

@@ -1,6 +1,7 @@
 // dtos/ticket.dto.js
 const Joi = require('joi');
 
+// ——— Schemas ———
 const noteSchema = Joi.object({
   datetime: Joi.string().isoDate().required(),
   event_type: Joi.string().required(),
@@ -17,17 +18,15 @@ const ticketSchema = Joi.object({
 
   patient_name: Joi.string().optional().allow('', null),
   patient_dob: Joi.string().optional().allow('', null),
-  // caller_name: Joi.string().optional().allow('', null),
 
   callback_number: Joi.string().optional().allow('', null),
   caller_id: Joi.string().optional().allow('', null),
 
-  // Permite numérico o string numérico (Joi convertirá si convert:true)
+  // Permite numérico; convert:true castea desde string numérica
   call_cost: Joi.number().optional().allow(null),
   call_duration: Joi.number().optional().allow(null),
 
   notes: Joi.array().items(noteSchema).required().default([]),
-
   collaborators: Joi.array().items(Joi.string().email()).required().default([]),
 
   url_audio: Joi.string().uri().optional().allow('', null),
@@ -44,15 +43,13 @@ const ticketSchema = Joi.object({
 
   work_time: Joi.array().optional(),
 
-  // Acepta objeto cualquiera o null
   linked_patient_snapshot: Joi.alternatives().try(
-    Joi.object().unknown(true),
+    Joi.object().unknown(true), // ✅ permite campos extra adentro
     Joi.valid(null)
   ).optional(),
 
   quality_control: Joi.any().optional().allow('', null),
 
-  // si tu Cosmos guarda otros formatos, puedes relajar esto:
   patient_id: Joi.string().uuid().optional().allow(null, ''),
 
   aiClassification: Joi.alternatives().try(
@@ -60,37 +57,72 @@ const ticketSchema = Joi.object({
     Joi.valid(null)
   ).optional(),
 })
-  // Acepta claves extra (por si aún no las limpiaste: _rid, _etag, _ts…)
-  .unknown(true);
-  
-function mapTicketToDto(ticket) {
+// ✅ aceptamos claves extra en el ticket original, pero recuerda que validamos el DTO mapeado
+.unknown(true);
+
+// ——— Sanitizadores básicos ———
+const toNumberOrNull = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const ensureArray = (v) => Array.isArray(v) ? v : [];
+const ensureNotesArray = (v) => {
+  if (!Array.isArray(v)) return [];
+  // Filtra entradas obviamente inválidas para no reventar el validador
+  return v.filter(n => n && typeof n === 'object');
+};
+
+// ——— Map explícito (pick de campos del DTO) + normalización ———
+function mapTicketToDto(ticket = {}) {
   return {
     id: ticket.id,
-    summary: ticket.summary,
-    call_reason: ticket.call_reason,
-    creation_date: ticket.creation_date,
-    patient_name: ticket.patient_name,
-    patient_dob: ticket.patient_dob,
-    // caller_name: ticket.caller_name,
-    callback_number: ticket.callback_number,
-    caller_id: ticket.caller_id,
-    call_cost: ticket.call_cost,
-    notes: ticket.notes,
-    collaborators: ticket.collaborators,
-    url_audio: ticket.url_audio,
-    assigned_department: ticket.assigned_department,
-    assigned_role: ticket.assigned_role,
-    caller_type: ticket.caller_type,
-    call_duration: ticket.call_duration,
-    status: ticket.status,
-    agent_assigned: ticket.agent_assigned,
-    tiket_source: ticket.tiket_source,
-    phone: ticket.phone,
-    work_time: ticket.work_time,
-    linked_patient_snapshot: ticket.linked_patient_snapshot,
-    quality_control: ticket.quality_control,
-    patient_id: ticket.patient_id,
-    aiClassification: ticket.aiClassification
+
+    summary: ticket.summary ?? null,
+    call_reason: ticket.call_reason ?? null,
+    creation_date: ticket.creation_date ?? null,
+
+    patient_name: ticket.patient_name ?? null,
+    patient_dob: ticket.patient_dob ?? null,
+
+    callback_number: ticket.callback_number ?? null,
+    caller_id: ticket.caller_id ?? null,
+
+    call_cost: toNumberOrNull(ticket.call_cost),
+    call_duration: toNumberOrNull(ticket.call_duration),
+
+    notes: ensureNotesArray(ticket.notes),
+    collaborators: ensureArray(ticket.collaborators),
+
+    url_audio: ticket.url_audio ?? null,
+
+    assigned_department: ticket.assigned_department ?? null,
+    assigned_role: ticket.assigned_role ?? null,
+    caller_type: ticket.caller_type ?? null,
+
+    status: ticket.status ?? null,
+    agent_assigned: ticket.agent_assigned ?? null,
+
+    tiket_source: ticket.tiket_source ?? null,
+    phone: ticket.phone ?? null,
+
+    work_time: Array.isArray(ticket.work_time) ? ticket.work_time : [],
+
+    linked_patient_snapshot: (
+      ticket.linked_patient_snapshot && typeof ticket.linked_patient_snapshot === 'object'
+        ? ticket.linked_patient_snapshot
+        : null
+    ),
+
+    quality_control: ticket.quality_control ?? null,
+
+    patient_id: ticket.patient_id ?? null,
+
+    aiClassification: (
+      ticket.aiClassification && typeof ticket.aiClassification === 'object'
+        ? ticket.aiClassification
+        : null
+    ),
   };
 }
 

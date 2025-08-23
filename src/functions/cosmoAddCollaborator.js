@@ -1,5 +1,4 @@
 // src/functions/cosmoUpdateCollaborators/index.js (CommonJS)
-const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
 
 const { getContainer } = require('../shared/cosmoClient');
@@ -22,18 +21,6 @@ const {
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
-/*async function notifySignalR(payload, context) {
-  if (!signalRUrl) return;
-  try {
-    await fetch(signalRUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    context.log('⚠️ SignalR failed:', e.message);
-  }
-}*/
 
 const lc = (s) => (s || '').toLowerCase();
 

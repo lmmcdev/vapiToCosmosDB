@@ -1,12 +1,14 @@
 // functions/cosmoGet/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
-const { success, error } = require('../shared/responseUtils');
+const { success, error, badRequest } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+// ✅ nuevo helper tolerante (stripUnknown, convert, best-effort)
+const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 
-DEPARTMENT = "Referrals";
+const DEPARTMENT = 'Referrals';
 
 const {
   ACCESS_GROUP: GROUP_CUSTOMER_SERVICE,
@@ -30,7 +32,7 @@ app.http('cosmoGet', {
         }
 
         // 2) Rol efectivo a partir de grupos
-        const { role, isSupervisor, isAgent } = getRoleGroups(claims, {
+        const { role } = getRoleGroups(claims, {
           SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
           AGENTS_GROUP: GROUP_CSERV_AGENTS,
         });
@@ -44,7 +46,6 @@ app.http('cosmoGet', {
         let query, parameters;
 
         if (role === 'supervisor') {
-          console.log("Supervisor query")
           // Supervisor: todos los tickets del departamento (excepto "done")
           query = `
             SELECT *
@@ -52,7 +53,7 @@ app.http('cosmoGet', {
             WHERE c.assigned_department = @department
               AND LOWER(c.status) != "done"
           `;
-          parameters = [{ name: "@department", value: DEPARTMENT }];
+          parameters = [{ name: '@department', value: DEPARTMENT }];
         } else {
           // Agente: su cola + no asignados del departamento (excepto "done")
           query = `
@@ -65,19 +66,26 @@ app.http('cosmoGet', {
               AND LOWER(c.status) != "done"
           `;
           parameters = [
-            { name: "@agentEmail", value: email },
-            { name: "@department", value: DEPARTMENT }
+            { name: '@agentEmail', value: email },
+            { name: '@department', value: DEPARTMENT },
           ];
         }
 
-        const { resources } = await container.items
+        const { resources = [] } = await container.items
           .query({ query, parameters })
           .fetchAll();
 
-        const final = resources.map(t => ({
-          ...t,
-          linked_patient_snapshot: t.linked_patient_snapshot || {}
-        }));
+        // 4) Formatear cada ticket con DTO tolerante (ignora campos extra)
+        const final = [];
+        for (const t of resources) {
+          try {
+            const dto = validateAndFormatTicket(t, badRequest, context, { strict: false });
+            final.push(dto);
+          } catch (e) {
+            // Con strict:false no debería lanzar; si lanza, no rompemos todo el batch
+            context.log('⚠️ Ticket skipped by DTO validation:', t?.id, e?.message);
+          }
+        }
 
         return success(final);
       } catch (err) {
@@ -90,7 +98,7 @@ app.http('cosmoGet', {
       scopesAny: ['access_as_user'],
       // Puerta de entrada al módulo: debe pertenecer al grupo del módulo
       groupsAny: [GROUP_CUSTOMER_SERVICE],
-      // No exigimos "rolesAny" aquí; el rol se resuelve DINÁMICAMENTE por grupos en el handler
+      // El rol se resuelve dinámicamente en el handler
     }
-  )
+  ),
 });
