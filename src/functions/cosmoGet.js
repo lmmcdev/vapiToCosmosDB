@@ -5,7 +5,7 @@ const { success, error, badRequest } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
-// ✅ nuevo helper tolerante (stripUnknown, convert, best-effort)
+// DTO helper tolerante
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 
 const DEPARTMENT = 'Referrals';
@@ -55,13 +55,17 @@ app.http('cosmoGet', {
           `;
           parameters = [{ name: '@department', value: DEPARTMENT }];
         } else {
-          // Agente: su cola + no asignados del departamento (excepto "done")
+          // Agente:
+          //  - tickets asignados al agente
+          //  - tickets sin asignar del departamento
+          //  - tickets donde el agente esté en collaborators[]
           query = `
             SELECT *
             FROM c
             WHERE (
                   c.agent_assigned = @agentEmail
                OR (c.agent_assigned = "" AND c.assigned_department = @department)
+               OR (IS_ARRAY(c.collaborators) AND ARRAY_CONTAINS(c.collaborators, @agentEmail))
                   )
               AND LOWER(c.status) != "done"
           `;
@@ -69,6 +73,20 @@ app.http('cosmoGet', {
             { name: '@agentEmail', value: email },
             { name: '@department', value: DEPARTMENT },
           ];
+
+          // Si necesitas búsqueda case-insensitive en colaboradores, puedes usar:
+          // query = `
+          //   SELECT *
+          //   FROM c
+          //   WHERE (
+          //         c.agent_assigned = @agentEmail
+          //      OR (c.agent_assigned = "" AND c.assigned_department = @department)
+          //      OR (IS_ARRAY(c.collaborators) AND EXISTS(
+          //           SELECT VALUE 1 FROM x IN c.collaborators WHERE LOWER(x) = LOWER(@agentEmail)
+          //         ))
+          //        )
+          //     AND LOWER(c.status) != "done"
+          // `;
         }
 
         const { resources = [] } = await container.items
@@ -82,7 +100,6 @@ app.http('cosmoGet', {
             const dto = validateAndFormatTicket(t, badRequest, context, { strict: false });
             final.push(dto);
           } catch (e) {
-            // Con strict:false no debería lanzar; si lanza, no rompemos todo el batch
             context.log('⚠️ Ticket skipped by DTO validation:', t?.id, e?.message);
           }
         }
@@ -94,11 +111,8 @@ app.http('cosmoGet', {
       }
     },
     {
-      // Reforzamos que el token tenga el scope correcto
       scopesAny: ['access_as_user'],
-      // Puerta de entrada al módulo: debe pertenecer al grupo del módulo
       groupsAny: [GROUP_CUSTOMER_SERVICE],
-      // El rol se resuelve dinámicamente en el handler
     }
   ),
 });
