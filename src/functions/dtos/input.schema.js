@@ -1,14 +1,13 @@
+// functions/dtos/input.schema.js
 const Joi = require('joi');
 
 // 🟢 Lista de estados válidos para el ticket
 const BASE_STATUSES = ['In Progress', 'Pending', 'Emergency'];
 const SUPERVISOR_STATUSES = [...BASE_STATUSES, 'Done'];
 
-
 // 🟩 Esquema: Asignación de agente
 const assignAgentInput = Joi.object({
   tickets: Joi.string().uuid().required().label('ticketId'),
-  //agent_email: Joi.string().email().required().label('agent_email'),
   target_agent_email: Joi.string().email().required().label('target_agent_email')
 });
 
@@ -35,35 +34,26 @@ const updateTicketStatusInput = Joi.object({
   }).label('newStatus'),
 });
 
-//update ticket notes
+// 📝 Esquema: Notas del ticket
 const updateTicketNotesInput = Joi.object({
   ticketId: Joi.string().uuid().required().label('ticketId'),
-
   notes: Joi.array()
-    .items(
-      Joi.object({
-        //agent_email: Joi.string().email().required().label('note.agent_email'),
-        event_type: Joi.string().valid('user_note', 'system_log').required().label('note.event_type'),
-        event: Joi.string().min(1).max(1000).required().label('note.content'),
-        datetime: Joi.string().isoDate().optional().label('note.datetime')
-      })
-    )
+    .items(Joi.object({
+      event_type: Joi.string().valid('user_note', 'system_log').required().label('note.event_type'),
+      event: Joi.string().min(1).max(1000).required().label('note.content'),
+      datetime: Joi.string().isoDate().optional().label('note.datetime')
+    }))
     .optional()
     .label('notes'),
-
   event: Joi.string().optional().label('event')
 })
   .custom((value, helpers) => {
     if (!value.notes && !value.event) {
-      return helpers.error('any.custom', {
-        message: 'At least one of "notes" or "event" must be provided.'
-      });
+      return helpers.error('any.custom', { message: 'At least one of "notes" or "event" must be provided.' });
     }
     return value;
   })
   .label('updateTicketNotesInput');
-
-
 
 // 🟨 Esquema: Actualización de fecha de nacimiento del paciente
 const updatePatientDOBInput = Joi.object({
@@ -77,7 +67,6 @@ const updatePatientDOBInput = Joi.object({
     })
 });
 
-
 // 🟪 Esquema: Actualización del teléfono del paciente
 const updatePatientPhoneInput = Joi.object({
   tickets: Joi.string().uuid().required().label('tickets'),
@@ -86,8 +75,7 @@ const updatePatientPhoneInput = Joi.object({
     .required()
     .label('new_phone')
     .messages({
-      'string.pattern.base':
-        'Invalid US phone number format. Use formats like 555-123-4567 or (555) 123-4567.'
+      'string.pattern.base': 'Invalid US phone number format. Use formats like 555-123-4567 or (555) 123-4567.'
     })
 });
 
@@ -97,18 +85,16 @@ const updateTicketDepartmentInput = Joi.object({
   newDepartment: Joi.string().min(2).max(100).required().label('newDepartment'),
 });
 
-//Esquema: Actualizacion de colaboradores del ticket
+// 🧑‍🤝‍🧑 Esquema: Actualización de colaboradores
 const updateTicketCollaboratorsInput = Joi.object({
   ticketId: Joi.string().uuid().required().label('ticketId'),
-  // Permite vaciar colaboradores pasando [] (para limpiar la lista)
   collaborators: Joi.array()
     .items(Joi.string().email().label('collaborator.email'))
     .required()
     .label('collaborators'),
 });
 
-
-// ---------- dto para busqueda de tickets ----------
+// ---------- dto para búsqueda de tickets ----------
 const createdAtRange = Joi.object({
   from: Joi.string().isoDate().optional(),
   to:   Joi.string().isoDate().optional(),
@@ -136,8 +122,28 @@ const getByIdsInput = Joi.object({
   limit: Joi.number().integer().min(1).max(200).default(10),
 });
 
+// 🧠 AI Classification (parcial)
+const aiClsSchema = Joi.object({
+  priority: Joi.string().trim().max(64).optional(),
+  risk: Joi.string().trim().max(64).optional(),
+  category: Joi.string().trim().max(64).optional(),
+}).min(1);
 
-
+// 📦 Body del endpoint de AI Classification
+const updateAiClassificationInput = Joi.object({
+  ticketId: Joi.string().uuid().required().label('ticketId'),
+  aiClassification: aiClsSchema.optional(),
+  priority: Joi.string().trim().max(64).optional(),
+  risk: Joi.string().trim().max(64).optional(),
+  category: Joi.string().trim().max(64).optional(),
+}).custom((val, helpers) => {
+  const hasObj = !!val.aiClassification;
+  const hasLoose = ['priority','risk','category'].some(k => val[k] !== undefined);
+  if (!hasObj && !hasLoose) {
+    return helpers.error('any.custom', { message: 'Provide aiClassification or at least one of priority/risk/category' });
+  }
+  return val;
+}, 'aiClassification presence check');
 
 module.exports = {
   assignAgentInput,
@@ -148,8 +154,12 @@ module.exports = {
   updatePatientDOBInput,
   updatePatientPhoneInput,
   updateTicketDepartmentInput,
-  BASE_STATUSES, SUPERVISOR_STATUSES,
   updateTicketCollaboratorsInput,
+  BASE_STATUSES, SUPERVISOR_STATUSES,
   searchBodySchema,
-  getByIdsInput
+  getByIdsInput,
+
+  // 🆕 exports AI
+  aiClsSchema,
+  updateAiClassificationInput,
 };
