@@ -194,7 +194,7 @@ app.http('cosmoInsertVapi', {
       patient_id,
       linked_patient_snapshot,
       url_audio: body.url_audio,
-      caller_id: null,
+      caller_id: body.caller_id || null,
       call_cost: cost,
       assigned_department: 'Referrals',
       call_duration,
