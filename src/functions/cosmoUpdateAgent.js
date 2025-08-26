@@ -22,7 +22,6 @@ const {
   //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
 } = GROUPS.REFERRALS;
 
-//const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('assignAgent', {
   route: 'assignAgent',
@@ -46,7 +45,8 @@ app.http('assignAgent', {
         //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
       });
       if (!role) {
-        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
+        return error('User has no role group for this module', 403, 'Error');
+        //return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
       }
 
       // 3) Parse + valida body con DTO (ticketId requerido)
@@ -116,19 +116,6 @@ app.http('assignAgent', {
       } catch (badReq) {
         return badReq;
       }
-
-      // 9) Notifica SignalR (best-effort)
-      /*if (signalRUrl) {
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
-      }*/
 
       // 10) Respuesta OK
       return success('Status updated successfully.', formattedDto);
