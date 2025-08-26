@@ -87,7 +87,7 @@ app.http('updateTicketsByPhone', {
               Name: patient.Name || '',
               DOB: patient.DOB || '',
               Address: patient.Address || '',
-              Location: patient.Location || '',
+              Location: patient.Location_Name || '',
             };
           }
         } catch (err) {
