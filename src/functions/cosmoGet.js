@@ -16,6 +16,16 @@ const {
   AGENTS_GROUP: GROUP_CSERV_AGENTS,
 } = GROUPS.REFERRALS;
 
+// helpers para calcular rango de día en ISO
+const toDayRange = (dateStr) => {
+  const base = dateStr ? new Date(dateStr) : new Date(); // usa hoy si no se pasa
+  const from = new Date(base);
+  from.setUTCHours(0, 0, 0, 0);
+  const to = new Date(base);
+  to.setUTCHours(23, 59, 59, 999);
+  return { from: from.toISOString(), to: to.toISOString() };
+};
+
 app.http('cosmoGet', {
   route: 'cosmoGet',
   methods: ['GET'],
@@ -25,13 +35,13 @@ app.http('cosmoGet', {
       try {
         const claims = context.user;
 
-        // 1) Email del token (para filtro en cola de agente)
+        // 1) Email del token
         const email = getEmailFromClaims(claims);
         if (!email) {
           return { status: 401, jsonBody: { error: 'Email not found in token' } };
         }
 
-        // 2) Rol efectivo a partir de grupos
+        // 2) Rol efectivo
         const { role } = getRoleGroups(claims, {
           SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
           AGENTS_GROUP: GROUP_CSERV_AGENTS,
@@ -42,23 +52,30 @@ app.http('cosmoGet', {
 
         const container = getContainer();
 
-        // 3) Query según rol
-        let query, parameters;
+        // 3) Manejo de parámetro "date"
+        const dateParam = req.query.get('date');
+        let dateFilter = '';
+        let parameters = [];
 
+        if (dateParam) {
+          const { from, to } = toDayRange(dateParam);
+          dateFilter = 'AND c.createdAt >= @from AND c.createdAt < @to';
+          parameters.push({ name: '@from', value: from });
+          parameters.push({ name: '@to', value: to });
+        }
+
+        // 4) Query según rol
+        let query;
         if (role === 'supervisor') {
-          // Supervisor: todos los tickets del departamento (excepto "done")
           query = `
             SELECT *
             FROM c
             WHERE c.assigned_department = @department
               AND LOWER(c.status) != "done"
+              ${dateFilter}
           `;
-          parameters = [{ name: '@department', value: DEPARTMENT }];
+          parameters.push({ name: '@department', value: DEPARTMENT });
         } else {
-          // Agente:
-          //  - tickets asignados al agente
-          //  - tickets sin asignar del departamento
-          //  - tickets donde el agente esté en collaborators[]
           query = `
             SELECT *
             FROM c
@@ -68,32 +85,18 @@ app.http('cosmoGet', {
                OR (IS_ARRAY(c.collaborators) AND ARRAY_CONTAINS(c.collaborators, @agentEmail))
                   )
               AND LOWER(c.status) != "done"
+              ${dateFilter}
           `;
-          parameters = [
-            { name: '@agentEmail', value: email },
-            { name: '@department', value: DEPARTMENT },
-          ];
-
-          // Si necesitas búsqueda case-insensitive en colaboradores, puedes usar:
-          // query = `
-          //   SELECT *
-          //   FROM c
-          //   WHERE (
-          //         c.agent_assigned = @agentEmail
-          //      OR (c.agent_assigned = "" AND c.assigned_department = @department)
-          //      OR (IS_ARRAY(c.collaborators) AND EXISTS(
-          //           SELECT VALUE 1 FROM x IN c.collaborators WHERE LOWER(x) = LOWER(@agentEmail)
-          //         ))
-          //        )
-          //     AND LOWER(c.status) != "done"
-          // `;
+          parameters.push({ name: '@agentEmail', value: email });
+          parameters.push({ name: '@department', value: DEPARTMENT });
         }
 
+        // 5) Ejecutar consulta
         const { resources = [] } = await container.items
           .query({ query, parameters })
           .fetchAll();
 
-        // 4) Formatear cada ticket con DTO tolerante (ignora campos extra)
+        // 6) DTO tolerante
         const final = [];
         for (const t of resources) {
           try {
