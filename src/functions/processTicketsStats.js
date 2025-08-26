@@ -39,8 +39,11 @@ const STATUS_ALIASES = {
 const MIAMI_TZ = 'America/New_York';
 
 // Endpoint HTTP alternativo si lo usas así:
-// app.http('processTicketStats', { methods: ['POST'], handler: ... })
+//app.http('processTicketStats', { methods: ['POST'], handler: ... })
 
+//app.http('processTicketStats', {
+//  methods: ['GET'],
+//  authLevel: 'anonymous',
 app.timer('processTicketStats', {
   // Cada hora en el minuto 50
   schedule: '0 50 * * * *',
@@ -49,19 +52,30 @@ app.timer('processTicketStats', {
       const ticketContainer = getContainer();
       const statsContainer = getStatsContainer();
 
-      // 1) Prefijo de fecha en HORA DE MIAMI para filtrar por el día (seguro en Cosmos)
-      const todayPrefix = dayjs().tz(MIAMI_TZ).format('MM/DD/YYYY'); // ej. "08/19/2025"
+      // 1) Rango del día en Miami
+      const startOfDay = dayjs().tz(MIAMI_TZ).startOf('day').toDate();
+      const endOfDay   = dayjs().tz(MIAMI_TZ).endOf('day').toDate();
 
-      // 2) Traer SOLO los tickets cuyo creation_date empieza por "MM/DD/YYYY"
-      //    Esto evita problemas de zonas horarias al comparar strings ISO con offset vs Z.
+      // 2) Convertir a ISO (UTC)
+      const startIso = startOfDay.toISOString(); // ej: "2025-08-26T04:00:00.000Z"
+      const endIso   = endOfDay.toISOString();   // ej: "2025-08-27T03:59:59.999Z"
+
+      // 3) Query con rango
       const { resources: tickets } = await ticketContainer.items
         .query({
-          query: 'SELECT * FROM c WHERE STARTSWITH(c.creation_date, @prefix)',
-          parameters: [{ name: '@prefix', value: todayPrefix }],
+          query: `
+            SELECT * FROM c
+            WHERE c.creation_date >= @start
+              AND c.creation_date <= @end
+          `,
+          parameters: [
+            { name: '@start', value: startIso },
+            { name: '@end', value: endIso },
+          ],
         })
         .fetchAll();
 
-      context.log(`Tickets found for ${todayPrefix}: ${tickets.length}`);
+      context.log(`Tickets found for ${dayjs().tz(MIAMI_TZ).format('YYYY-MM-DD')}: ${tickets.length}`);
 
       // 3) Acumuladores
       let globalTotalTime = 0;
