@@ -40,10 +40,9 @@ const STATUS_ALIASES = {
 const MIAMI_TZ = 'America/New_York';
 const signalrMonthlyStats = process.env.SIGNAL_BROADCAST_URL_MONTHLY;
 
-// Helpers de fechas
+// Helpers
 function yyyymm(d) { return `${d.year()}-${String(d.month() + 1).padStart(2, '0')}`; }
 function yyyy_mm_dd(d) { return d.format('YYYY-MM-DD'); }
-function startOfMonthMiami(d) { return d.startOf('month'); }
 function prevMonthStartEndMiami(nowMiami) {
   const startPrev = nowMiami.subtract(1, 'month').startOf('month');
   const endPrev   = nowMiami.startOf('month'); // inicio del mes actual
@@ -60,28 +59,28 @@ function aggregateMonthly(tickets) {
   let globalTotalTime = 0;
   let resolvedCount = 0;
 
-  const agentStatsMap = {};       // { [agentEmail]: { totalTime, resolved } }
-  const dailyMap = {};            // { [YYYY-MM-DD]: count }
-  const priorityMap = {};         // { [priority]: { count, ticketIds[] } }
-  const riskMap = {};             // { [risk]: { count, ticketIds[] } }
-  const categoryMap = {};         // { [category]: { count, ticketIds[] } }
+  const agentStatsMap = {};
+  const dailyMap = {};
+  const priorityMap = {};
+  const riskMap = {};
+  const categoryMap = {};
   const statusCounts = ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {});
 
   for (const t of tickets) {
-    // conteo por día (si tienes createdAt en ISO Miami/UTC da igual para el histograma simple)
+    // Histograma diario
     const created = t?.createdAt ? new Date(t.createdAt) : null;
     if (created && !isNaN(created)) {
-      const day = created.toISOString().slice(0, 10); // YYYY-MM-DD (vale para histograma)
+      const day = created.toISOString().slice(0, 10);
       dailyMap[day] = (dailyMap[day] || 0) + 1;
     }
 
-    // estados normalizados
+    // Estados
     const st = normalizeStatus(t?.status);
     if (st && Object.prototype.hasOwnProperty.call(statusCounts, st)) {
       statusCounts[st] += 1;
     }
 
-    // tiempos de resolución (si existe closedAt)
+    // Resolución
     const closed = t?.closedAt ? new Date(t.closedAt) : null;
     if (created && closed && !isNaN(closed)) {
       const diffMins = Math.floor((closed - created) / 60000);
@@ -158,30 +157,28 @@ app.timer('processMonthlyTicketStats', {
 
       const nowMiami = dayjs().tz(MIAMI_TZ);
 
-      // ---------- A) MTD (mes en curso): upsert incremental con mismo ID ----------
+      // ---------- A) MTD ----------
       {
-        const mm = nowMiami.format('MM');      // "08"
-        const yyyy = nowMiami.format('YYYY');  // "2025"
+        const startOfMonth = nowMiami.startOf('month').toDate();
+        const endOfMonth   = nowMiami.endOf('month').toDate();
 
-        // Filtra por mes y año en creation_date (seguro para TZ/DST):
-        // STARTSWITH -> "MM/", CONTAINS -> "/YYYY"
         const { resources: ticketsMTD } = await ticketContainer.items
           .query({
             query: `
               SELECT * FROM c
-              WHERE STARTSWITH(c.creation_date, @mmSlash)
-                AND CONTAINS(c.creation_date, @slashYYYY)
+              WHERE c.creation_date >= @start
+                AND c.creation_date <= @end
             `,
             parameters: [
-              { name: '@mmSlash', value: `${mm}/` },
-              { name: '@slashYYYY', value: `/${yyyy}` },
+              { name: '@start', value: startOfMonth.toISOString() },
+              { name: '@end', value: endOfMonth.toISOString() },
             ],
           })
           .fetchAll();
 
         const agg = aggregateMonthly(ticketsMTD);
 
-        const idMTD = `month-${yyyymm(nowMiami)}`; // p.ej. "month-2025-08"
+        const idMTD = `month-${yyyymm(nowMiami)}`;
         const docMTD = {
           id: idMTD,
           date: yyyy_mm_dd(nowMiami),
@@ -211,33 +208,30 @@ app.timer('processMonthlyTicketStats', {
         }
       }
 
-      // ---------- B) Cierre de mes: el 1º del mes a las 00:10, cerramos el mes anterior ----------
+      // ---------- B) Mes anterior ----------
       if (nowMiami.date() === 1) {
-        const { startPrev } = prevMonthStartEndMiami(nowMiami); // inicio del mes anterior en Miami
-
-        const mmPrev = startPrev.format('MM');
-        const yyyyPrev = startPrev.format('YYYY');
+        const { startPrev, endPrev } = prevMonthStartEndMiami(nowMiami);
 
         const { resources: ticketsPrev } = await ticketContainer.items
           .query({
             query: `
               SELECT * FROM c
-              WHERE STARTSWITH(c.creation_date, @mmSlash)
-                AND CONTAINS(c.creation_date, @slashYYYY)
+              WHERE c.creation_date >= @start
+                AND c.creation_date < @end
             `,
             parameters: [
-              { name: '@mmSlash', value: `${mmPrev}/` },
-              { name: '@slashYYYY', value: `/${yyyyPrev}` },
+              { name: '@start', value: startPrev.toDate().toISOString() },
+              { name: '@end', value: endPrev.toDate().toISOString() },
             ],
           })
           .fetchAll();
 
         const aggFinal = aggregateMonthly(ticketsPrev);
 
-        const idFinal = `month-${yyyymm(startPrev)}-final`; // "month-2025-07-final"
+        const idFinal = `month-${yyyymm(startPrev)}-final`;
         const docFinal = {
           id: idFinal,
-          date: yyyy_mm_dd(nowMiami), // fecha de cierre (inicio mes actual en Miami)
+          date: yyyy_mm_dd(nowMiami),
           scope: 'final',
           ...aggFinal,
         };
