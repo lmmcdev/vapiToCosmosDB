@@ -68,6 +68,7 @@ setInterval(async () => {
   // Notificar SignalR (best effort)
   for (const doc of batch) {
     const assigned_department = doc.assigned_department;
+    console.log(`Notifying SignalR for department: ${assigned_department}`);
     try {
       fetch(signalRUrl, {
         method: 'POST',
@@ -196,7 +197,7 @@ app.http('cosmoInsertVapi', {
       url_audio: body.url_audio,
       caller_id: body.caller_id || null,
       call_cost: cost,
-      assigned_department: 'Referrals',
+      assigned_department: body.assigned_department || 'referrals',
       call_duration,
       status: 'New',
       quality_control: false,
