@@ -197,7 +197,7 @@ app.http('cosmoInsertVapi', {
       url_audio: body.url_audio,
       caller_id: body.caller_id || null,
       call_cost: cost,
-      assigned_department: body.assigned_department || 'referrals',
+      assigned_department: body.assigned_department || 'referrals', //el departamento asignado, en este endpoint es switchboard, Erika agregarlo en el JSON de la llamada de VAPI
       call_duration,
       status: 'New',
       quality_control: false,
