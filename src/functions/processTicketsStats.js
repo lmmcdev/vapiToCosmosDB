@@ -24,7 +24,7 @@ const ALLOWED_STATUSES = DTO_ALLOWED_STATUSES || [
   'Duplicated',
 ];
 
-// Mapa de normalización -> clave canónica
+// Normalización de estados
 const STATUS_ALIASES = {
   'new': 'New',
   'in progress': 'In Progress',
@@ -38,12 +38,6 @@ const STATUS_ALIASES = {
 
 const MIAMI_TZ = 'America/New_York';
 
-// Endpoint HTTP alternativo si lo usas así:
-//app.http('processTicketStats', { methods: ['POST'], handler: ... })
-
-//app.http('processTicketStats', {
-//  methods: ['GET'],
-//  authLevel: 'anonymous',
 app.timer('processTicketStats', {
   // Cada hora en el minuto 50
   schedule: '0 50 * * * *',
@@ -53,14 +47,13 @@ app.timer('processTicketStats', {
       const statsContainer = getStatsContainer();
 
       // 1) Rango del día en Miami
-      const startOfDay = dayjs().tz(MIAMI_TZ).startOf('day').toDate();
-      const endOfDay   = dayjs().tz(MIAMI_TZ).endOf('day').toDate();
+      const startOfDay = dayjs().tz(MIAMI_TZ).startOf('day');
+      const endOfDay   = dayjs().tz(MIAMI_TZ).endOf('day');
 
-      // 2) Convertir a ISO (UTC)
-      const startIso = startOfDay.toISOString(); // ej: "2025-08-26T04:00:00.000Z"
-      const endIso   = endOfDay.toISOString();   // ej: "2025-08-27T03:59:59.999Z"
+      const startIso = startOfDay.toISOString();
+      const endIso   = endOfDay.toISOString();
 
-      // 3) Query con rango
+      // 2) Query por rango en creation_date (ISO con offset)
       const { resources: tickets } = await ticketContainer.items
         .query({
           query: `
@@ -81,41 +74,42 @@ app.timer('processTicketStats', {
       let globalTotalTime = 0;
       let resolvedCount = 0;
 
-      const agentStatsMap = {}; // { [agentEmail]: { totalTime, resolved } }
-      const hourlyMap = {};     // { [hour]: count }
-      const priorityMap = {};   // { [priority]: {count, ticketIds[]} }
-      const riskMap = {};       // { [risk]: {count, ticketIds[]} }
-      const categoryMap = {};   // { [category]: {count, ticketIds[]} }
+      const agentStatsMap = {};
+      const hourlyMap = {};
+      const priorityMap = {};
+      const riskMap = {};
+      const categoryMap = {};
 
-      // Inicializa contador por estado con 0 para que el DTO valide exacto
       const statusCounts = ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {});
 
-      // helper normalización
       const normalizeStatus = (s) => {
         if (!s) return null;
         const key = String(s).trim().toLowerCase();
         return STATUS_ALIASES[key] || null;
       };
 
-      // 4) Procesamiento
+      // 4) Procesamiento ticket por ticket
       for (const ticket of tickets) {
-        // Histograma por hora de creación (usa createdAt si existe)
-        const created = ticket?.createdAt ? new Date(ticket.createdAt) : null;
-        if (created && !isNaN(created)) {
-          const hour = created.getHours();
+        // 🔹 Parse creation_date/createdAt en TZ Miami
+        const created = ticket?.createdAt
+          ? dayjs(ticket.createdAt).tz(MIAMI_TZ)
+          : (ticket?.creation_date ? dayjs(ticket.creation_date).tz(MIAMI_TZ) : null);
+
+        if (created && created.isValid()) {
+          const hour = created.hour();
           hourlyMap[hour] = (hourlyMap[hour] || 0) + 1;
         }
 
-        // Conteo por estado normalizado
+        // Estado normalizado
         const normStatus = normalizeStatus(ticket?.status);
         if (normStatus && Object.prototype.hasOwnProperty.call(statusCounts, normStatus)) {
           statusCounts[normStatus] += 1;
         }
 
-        // Tiempos de resolución (si tienes closedAt)
-        const closed = ticket?.closedAt ? new Date(ticket.closedAt) : null;
-        if (created && closed && !isNaN(closed)) {
-          const diffMins = Math.floor((closed - created) / 60000);
+        // 🔹 Parse closedAt en TZ Miami
+        const closed = ticket?.closedAt ? dayjs(ticket.closedAt).tz(MIAMI_TZ) : null;
+        if (created && closed && closed.isValid()) {
+          const diffMins = closed.diff(created, 'minute');
           if (diffMins >= 0) {
             globalTotalTime += diffMins;
             resolvedCount += 1;
@@ -152,7 +146,7 @@ app.timer('processTicketStats', {
         }
       }
 
-      // 5) Construye documento final
+      // 5) DTO Final
       const agentStats = Object.entries(agentStatsMap).map(([agentEmail, stats]) => ({
         agentEmail,
         avgResolutionTimeMins: stats.resolved ? Math.round(stats.totalTime / stats.resolved) : 0,
@@ -174,7 +168,6 @@ app.timer('processTicketStats', {
         category: categoryMap,
       };
 
-      // Total del día (útil para UI)
       const totalForDay = Object.values(statusCounts).reduce((sum, n) => sum + (n || 0), 0);
       const statusCountsWithTotal = { ...statusCounts, Total: totalForDay };
 
@@ -189,7 +182,7 @@ app.timer('processTicketStats', {
         aiClassificationStats,
       };
 
-      // 6) Valida contra el DTO externo (no bloqueante, solo log)
+      // 6) Validación DTO
       if (DailyStatsOutput) {
         const { error: dtoErr } = DailyStatsOutput.validate(statDoc, { abortEarly: false });
         if (dtoErr) {
@@ -197,11 +190,11 @@ app.timer('processTicketStats', {
         }
       }
 
-      // 7) Upsert en Cosmos
+      // 7) Upsert Cosmos
       await statsContainer.items.upsert(statDoc);
       context.log('Stats upserted to Cosmos successfully');
 
-      // 8) (Opcional) Broadcast por SignalR
+      // 8) Opcional: Broadcast por SignalR
       const signalrDailyStats = process.env.SIGNALR_SEND_GROUPS;
       if (signalrDailyStats) {
         try {
@@ -212,7 +205,7 @@ app.timer('processTicketStats', {
               hub: 'ticketshubchannels',
               groupName: 'department:Referrals',
               target: 'dailyStats',
-              payload: [statDoc], // Azure SignalR espera 'arguments' como array
+              payload: [statDoc],
             })
           });
           const text = await resp.text();
