@@ -55,6 +55,13 @@ function normalizeStatus(s) {
   return STATUS_ALIASES[key] || null;
 }
 
+// Extrae fecha "de pared" YYYY-MM-DD desde un ISO con offset, sin convertir TZ
+function extractClockDate(isoLike) {
+  if (!isoLike || typeof isoLike !== 'string') return null;
+  const m = isoLike.match(/^(\d{4}-\d{2}-\d{2})T/);
+  return m ? m[1] : null;
+}
+
 function aggregateMonthly(tickets) {
   let globalTotalTime = 0;
   let resolvedCount = 0;
@@ -67,10 +74,12 @@ function aggregateMonthly(tickets) {
   const statusCounts = ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {});
 
   for (const t of tickets) {
-    // Histograma diario
-    const created = t?.createdAt ? new Date(t.createdAt) : null;
-    if (created && !isNaN(created)) {
-      const day = created.toISOString().slice(0, 10);
+    // Histograma diario (usar fecha del string sin convertir TZ)
+    const openStr = (typeof t?.createdAt === 'string' && t.createdAt) ||
+                    (typeof t?.creation_date === 'string' && t.creation_date) ||
+                    null;
+    const day = openStr ? extractClockDate(openStr) : null;
+    if (day) {
       dailyMap[day] = (dailyMap[day] || 0) + 1;
     }
 
@@ -80,18 +89,22 @@ function aggregateMonthly(tickets) {
       statusCounts[st] += 1;
     }
 
-    // Resolución
-    const closed = t?.closedAt ? new Date(t.closedAt) : null;
-    if (created && closed && !isNaN(closed)) {
-      const diffMins = Math.floor((closed - created) / 60000);
-      if (diffMins >= 0) {
-        globalTotalTime += diffMins;
-        resolvedCount += 1;
+    // Resolución (diferencia real con Date en UTC)
+    const closedStr = (typeof t?.closedAt === 'string' && t.closedAt) || null;
+    if (openStr && closedStr) {
+      const opened = new Date(openStr);
+      const closed = new Date(closedStr);
+      if (!isNaN(opened) && !isNaN(closed)) {
+        const diffMins = Math.floor((closed - opened) / 60000);
+        if (diffMins >= 0) {
+          globalTotalTime += diffMins;
+          resolvedCount += 1;
 
-        const agent = (t.agent_assigned || 'unassigned').toLowerCase();
-        if (!agentStatsMap[agent]) agentStatsMap[agent] = { totalTime: 0, resolved: 0 };
-        agentStatsMap[agent].totalTime += diffMins;
-        agentStatsMap[agent].resolved  += 1;
+          const agent = (t.agent_assigned || 'unassigned').toLowerCase();
+          if (!agentStatsMap[agent]) agentStatsMap[agent] = { totalTime: 0, resolved: 0 };
+          agentStatsMap[agent].totalTime += diffMins;
+          agentStatsMap[agent].resolved  += 1;
+        }
       }
     }
 
@@ -101,20 +114,17 @@ function aggregateMonthly(tickets) {
 
       if (priority) {
         const p = String(priority);
-        if (!priorityMap[p]) priorityMap[p] = { count: 0, ticketIds: [] };
-        priorityMap[p].count += 1;
+        (priorityMap[p] ||= { count: 0, ticketIds: [] }).count++;
         if (t.id) priorityMap[p].ticketIds.push(t.id);
       }
       if (risk) {
         const r = String(risk);
-        if (!riskMap[r]) riskMap[r] = { count: 0, ticketIds: [] };
-        riskMap[r].count += 1;
+        (riskMap[r] ||= { count: 0, ticketIds: [] }).count++;
         if (t.id) riskMap[r].ticketIds.push(t.id);
       }
       if (category) {
         const c = String(category);
-        if (!categoryMap[c]) categoryMap[c] = { count: 0, ticketIds: [] };
-        categoryMap[c].count += 1;
+        (categoryMap[c] ||= { count: 0, ticketIds: [] }).count++;
         if (t.id) categoryMap[c].ticketIds.push(t.id);
       }
     }
@@ -157,28 +167,25 @@ app.timer('processMonthlyTicketStats', {
 
       const nowMiami = dayjs().tz(MIAMI_TZ);
 
-      // ---------- A) MTD ----------
+      // ---------- A) MTD (prefijo 'YYYY-MM' en strings) ----------
       {
-        const startOfMonth = nowMiami.startOf('month').toDate();
-        const endOfMonth   = nowMiami.endOf('month').toDate();
-
+        const ymPrefix = nowMiami.format('YYYY-MM'); // ej. "2025-08"
         const { resources: ticketsMTD } = await ticketContainer.items
           .query({
             query: `
               SELECT * FROM c
-              WHERE c.creation_date >= @start
-                AND c.creation_date <= @end
+              WHERE
+                (IS_STRING(c.creation_date) AND STARTSWITH(c.creation_date, @ym))
+                OR
+                (IS_STRING(c.createdAt) AND STARTSWITH(c.createdAt, @ym))
             `,
-            parameters: [
-              { name: '@start', value: startOfMonth.toISOString() },
-              { name: '@end', value: endOfMonth.toISOString() },
-            ],
+            parameters: [{ name: '@ym', value: ymPrefix }],
           })
           .fetchAll();
 
         const agg = aggregateMonthly(ticketsMTD);
 
-        const idMTD = `month-${yyyymm(nowMiami)}`;
+        const idMTD = `month-${yyyymm(nowMiami)}`; // p.ej. "month-2025-08"
         const docMTD = {
           id: idMTD,
           date: yyyy_mm_dd(nowMiami),
@@ -208,30 +215,30 @@ app.timer('processMonthlyTicketStats', {
         }
       }
 
-      // ---------- B) Mes anterior ----------
+      // ---------- B) Mes anterior (día 1) ----------
       if (nowMiami.date() === 1) {
-        const { startPrev, endPrev } = prevMonthStartEndMiami(nowMiami);
+        const { startPrev } = prevMonthStartEndMiami(nowMiami);
+        const ymPrev = startPrev.format('YYYY-MM');
 
         const { resources: ticketsPrev } = await ticketContainer.items
           .query({
             query: `
               SELECT * FROM c
-              WHERE c.creation_date >= @start
-                AND c.creation_date < @end
+              WHERE
+                (IS_STRING(c.creation_date) AND STARTSWITH(c.creation_date, @ym))
+                OR
+                (IS_STRING(c.createdAt) AND STARTSWITH(c.createdAt, @ym))
             `,
-            parameters: [
-              { name: '@start', value: startPrev.toDate().toISOString() },
-              { name: '@end', value: endPrev.toDate().toISOString() },
-            ],
+            parameters: [{ name: '@ym', value: ymPrev }],
           })
           .fetchAll();
 
         const aggFinal = aggregateMonthly(ticketsPrev);
 
-        const idFinal = `month-${yyyymm(startPrev)}-final`;
+        const idFinal = `month-${yyyymm(startPrev)}-final`; // "month-2025-07-final"
         const docFinal = {
           id: idFinal,
-          date: yyyy_mm_dd(nowMiami),
+          date: yyyy_mm_dd(nowMiami), // fecha de cierre
           scope: 'final',
           ...aggFinal,
         };
