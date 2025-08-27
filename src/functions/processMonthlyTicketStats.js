@@ -38,7 +38,7 @@ const STATUS_ALIASES = {
 };
 
 const MIAMI_TZ = 'America/New_York';
-const signalrMonthlyStats = process.env.SIGNAL_BROADCAST_URL_MONTHLY;
+//const signalrMonthlyStats = process.env.SIGNAL_BROADCAST_URL_MONTHLY;
 
 // Helpers
 function yyyymm(d) { return `${d.year()}-${String(d.month() + 1).padStart(2, '0')}`; }
@@ -48,18 +48,22 @@ function prevMonthStartEndMiami(nowMiami) {
   const endPrev   = nowMiami.startOf('month'); // inicio del mes actual
   return { startPrev, endPrev };
 }
-
 function normalizeStatus(s) {
   if (!s) return null;
   const key = String(s).trim().toLowerCase();
   return STATUS_ALIASES[key] || null;
 }
-
-// Extrae fecha "de pared" YYYY-MM-DD desde un ISO con offset, sin convertir TZ
+// YYYY-MM-DD desde ISO con offset, sin convertir TZ
 function extractClockDate(isoLike) {
   if (!isoLike || typeof isoLike !== 'string') return null;
   const m = isoLike.match(/^(\d{4}-\d{2}-\d{2})T/);
   return m ? m[1] : null;
+}
+// HH (0-23) desde ISO con offset, sin convertir TZ
+function extractClockHour(isoLike) {
+  if (!isoLike || typeof isoLike !== 'string') return null;
+  const m = isoLike.match(/T(\d{2}):/);
+  return m ? Number(m[1]) : null;
 }
 
 function aggregateMonthly(tickets) {
@@ -67,20 +71,27 @@ function aggregateMonthly(tickets) {
   let resolvedCount = 0;
 
   const agentStatsMap = {};
-  const dailyMap = {};
+  const dailyMap = {};   // YYYY-MM-DD -> count
+  const hourlyMap = {};  // 0..23 -> count (acumulado mensual)
   const priorityMap = {};
   const riskMap = {};
   const categoryMap = {};
   const statusCounts = ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {});
 
   for (const t of tickets) {
-    // Histograma diario (usar fecha del string sin convertir TZ)
-    const openStr = (typeof t?.createdAt === 'string' && t.createdAt) ||
-                    (typeof t?.creation_date === 'string' && t.creation_date) ||
-                    null;
+    const openStr =
+      (typeof t?.createdAt === 'string' && t.createdAt) ||
+      (typeof t?.creation_date === 'string' && t.creation_date) ||
+      null;
+
+    // --- Daily: sumar por fecha “de pared”
     const day = openStr ? extractClockDate(openStr) : null;
-    if (day) {
-      dailyMap[day] = (dailyMap[day] || 0) + 1;
+    if (day) dailyMap[day] = (dailyMap[day] || 0) + 1;
+
+    // --- Hourly mensual: sumar por hora “de pared”
+    const hour = openStr ? extractClockHour(openStr) : null;
+    if (hour !== null && hour >= 0 && hour <= 23) {
+      hourlyMap[hour] = (hourlyMap[hour] || 0) + 1;
     }
 
     // Estados
@@ -140,6 +151,10 @@ function aggregateMonthly(tickets) {
     .map(([date, count]) => ({ date, count }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  const hourlyBreakdown = Object.entries(hourlyMap)
+    .map(([h, count]) => ({ hour: Number(h), count }))
+    .sort((a, b) => a.hour - b.hour);
+
   const globalStats = {
     avgResolutionTimeMins: resolvedCount ? Math.round(globalTotalTime / resolvedCount) : 0,
     resolvedCount,
@@ -154,7 +169,14 @@ function aggregateMonthly(tickets) {
     category: categoryMap,
   };
 
-  return { agentStats, dailyBreakdown, globalStats, statusCounts: statusCountsWithTotal, aiClassificationStats };
+  return {
+    agentStats,
+    dailyBreakdown,     // por día del mes (se mantiene)
+    hourlyBreakdown,    // 👈 NUEVO: total por hora del mes
+    globalStats,
+    statusCounts: statusCountsWithTotal,
+    aiClassificationStats,
+  };
 }
 
 app.timer('processMonthlyTicketStats', {
@@ -201,7 +223,7 @@ app.timer('processMonthlyTicketStats', {
         await statsContainer.items.upsert(docMTD);
         context.log(`Monthly MTD upserted: ${idMTD}`);
 
-        if (signalrMonthlyStats) {
+        /*if (signalrMonthlyStats) {
           try {
             const r = await fetch(signalrMonthlyStats, {
               method: 'POST',
@@ -212,7 +234,7 @@ app.timer('processMonthlyTicketStats', {
           } catch (e) {
             context.log(`SignalR MTD failed: ${e.message}`);
           }
-        }
+        }*/
       }
 
       // ---------- B) Mes anterior (día 1) ----------
@@ -251,7 +273,7 @@ app.timer('processMonthlyTicketStats', {
         await statsContainer.items.upsert(docFinal);
         context.log(`Monthly FINAL upserted: ${idFinal}`);
 
-        if (signalrMonthlyStats) {
+        /*if (signalrMonthlyStats) {
           try {
             const r = await fetch(signalrMonthlyStats, {
               method: 'POST',
@@ -262,10 +284,10 @@ app.timer('processMonthlyTicketStats', {
           } catch (e) {
             context.log(`SignalR FINAL failed: ${e.message}`);
           }
-        }
+        }*/
       }
     } catch (err) {
-      context.log.error('Error processing monthly stats:', err?.message || err);
+      console.log(err);
     }
   },
 });
