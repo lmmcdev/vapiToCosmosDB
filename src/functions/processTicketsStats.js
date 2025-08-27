@@ -37,54 +37,50 @@ const STATUS_ALIASES = {
 
 const MIAMI_TZ = 'America/New_York';
 
+function extractClockHour(isoLike) {
+  if (!isoLike || typeof isoLike !== 'string') return null;
+  // matches: 2025-08-27T07:32:36.835+04:00  -> captura "07"
+  const m = isoLike.match(/T(\d{2}):\d{2}/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  return (h >= 0 && h <= 23) ? h : null;
+}
+
 app.timer('processTicketStats', {
-  // Cada hora en el minuto 50
   schedule: '0 50 * * * *',
   handler: async (_timer, context) => {
     try {
       const ticketContainer = getContainer();
       const statsContainer = getStatsContainer();
 
-      // 👇 Día objetivo (etiqueta) en Miami
       const todayYmdMiami = dayjs().tz(MIAMI_TZ).format('YYYY-MM-DD');
 
-      // 👇 IMPORTANTE:
-      // En vez de comparar rangos ISO (que se rompen con offsets),
-      // traemos los documentos cuyo string empieza por "YYYY-MM-DD"
-      // tanto en creation_date como en createdAt.
+      // Trae documentos del “día visible” (por string)
       const { resources: tickets } = await ticketContainer.items
         .query({
           query: `
             SELECT * FROM c
             WHERE
-              (
-                IS_STRING(c.creation_date) AND STARTSWITH(c.creation_date, @ymd)
-              )
+              (IS_STRING(c.creation_date) AND STARTSWITH(c.creation_date, @ymd))
               OR
-              (
-                IS_STRING(c.createdAt) AND STARTSWITH(c.createdAt, @ymd)
-              )
+              (IS_STRING(c.createdAt) AND STARTSWITH(c.createdAt, @ymd))
           `,
-          parameters: [
-            { name: '@ymd', value: todayYmdMiami },
-          ],
+          parameters: [{ name: '@ymd', value: todayYmdMiami }],
         })
         .fetchAll();
 
       context.log(`Tickets (string-day=${todayYmdMiami}) encontrados: ${tickets.length}`);
 
-      // Acumuladores
       let globalTotalTime = 0;
       let resolvedCount = 0;
 
-      const agentStatsMap = {}; // { [agentEmail]: { totalTime, resolved } }
-      const hourlyMap = {};     // { [hour]: count }
-      const priorityMap = {};   // { [priority]: {count, ticketIds[]} }
-      const riskMap = {};       // { [risk]: {count, ticketIds[]} }
-      const categoryMap = {};   // { [category]: {count, ticketIds[]} }
+      const agentStatsMap = {};
+      const hourlyMap = {};
+      const priorityMap = {};
+      const riskMap = {};
+      const categoryMap = {};
 
       const statusCounts = ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {});
-
       const normalizeStatus = (s) => {
         if (!s) return null;
         const key = String(s).trim().toLowerCase();
@@ -92,59 +88,55 @@ app.timer('processTicketStats', {
       };
 
       for (const t of tickets) {
-        // ⚠️ "Wall clock" en Miami (NO mover el reloj, sólo re-anclar):
-        // tz(_, MIAMI_TZ, true) mantiene la hora del string tal cual.
+        // ---- HORA “DE PARED” SIN TZ ----
         const src = t?.createdAt || t?.creation_date;
-        const createdMiamiWall = src ? dayjs(src).tz(MIAMI_TZ, true) : null;
-
-        if (createdMiamiWall?.isValid()) {
-          // Hora local “visible” (7am queda 7)
-          const hour = createdMiamiWall.hour();
+        const hour = extractClockHour(src);
+        if (hour !== null) {
           hourlyMap[hour] = (hourlyMap[hour] || 0) + 1;
         }
 
-        // Estado
+        // Estados
         const normStatus = normalizeStatus(t?.status);
         if (normStatus && Object.prototype.hasOwnProperty.call(statusCounts, normStatus)) {
           statusCounts[normStatus] += 1;
         }
 
-        // Tiempos de resolución (si tienes closedAt)
-        const closedSrc = t?.closedAt || null;
-        const closedMiamiWall = closedSrc ? dayjs(closedSrc).tz(MIAMI_TZ, true) : null;
-        if (createdMiamiWall?.isValid() && closedMiamiWall?.isValid()) {
-          const diffMins = closedMiamiWall.diff(createdMiamiWall, 'minute');
-          if (diffMins >= 0) {
-            globalTotalTime += diffMins;
-            resolvedCount += 1;
-
-            const agent = (t.agent_assigned || 'unassigned').toLowerCase();
-            if (!agentStatsMap[agent]) agentStatsMap[agent] = { totalTime: 0, resolved: 0 };
-            agentStatsMap[agent].totalTime += diffMins;
-            agentStatsMap[agent].resolved += 1;
+        // Tiempos de resolución (mide diferencia de los dos strings tal cual)
+        const openStr = t?.createdAt || t?.creation_date;
+        const closedStr = t?.closedAt || null;
+        if (openStr && closedStr) {
+          // Calcula diff minutos como fecha real (aquí SÍ usamos Date)
+          const opened = new Date(openStr);
+          const closed = new Date(closedStr);
+          if (!isNaN(opened) && !isNaN(closed)) {
+            const diffMins = Math.floor((closed - opened) / 60000);
+            if (diffMins >= 0) {
+              globalTotalTime += diffMins;
+              resolvedCount += 1;
+              const agent = (t.agent_assigned || 'unassigned').toLowerCase();
+              if (!agentStatsMap[agent]) agentStatsMap[agent] = { totalTime: 0, resolved: 0 };
+              agentStatsMap[agent].totalTime += diffMins;
+              agentStatsMap[agent].resolved += 1;
+            }
           }
         }
 
         // IA
         if (t?.aiClassification) {
           const { priority, risk, category } = t.aiClassification;
-
           if (priority) {
             const p = String(priority);
-            if (!priorityMap[p]) priorityMap[p] = { count: 0, ticketIds: [] };
-            priorityMap[p].count += 1;
+            (priorityMap[p] ||= { count: 0, ticketIds: [] }).count++;
             if (t.id) priorityMap[p].ticketIds.push(t.id);
           }
           if (risk) {
             const r = String(risk);
-            if (!riskMap[r]) riskMap[r] = { count: 0, ticketIds: [] };
-            riskMap[r].count += 1;
+            (riskMap[r] ||= { count: 0, ticketIds: [] }).count++;
             if (t.id) riskMap[r].ticketIds.push(t.id);
           }
           if (category) {
             const c = String(category);
-            if (!categoryMap[c]) categoryMap[c] = { count: 0, ticketIds: [] };
-            categoryMap[c].count += 1;
+            (categoryMap[c] ||= { count: 0, ticketIds: [] }).count++;
             if (t.id) categoryMap[c].ticketIds.push(t.id);
           }
         }
@@ -157,7 +149,7 @@ app.timer('processTicketStats', {
       }));
 
       const hourlyBreakdown = Object.entries(hourlyMap)
-        .map(([hour, count]) => ({ hour: parseInt(hour, 10), count }))
+        .map(([h, count]) => ({ hour: parseInt(h, 10), count }))
         .sort((a, b) => a.hour - b.hour);
 
       const globalStats = {
@@ -165,16 +157,12 @@ app.timer('processTicketStats', {
         resolvedCount,
       };
 
-      const aiClassificationStats = {
-        priority: priorityMap,
-        risk: riskMap,
-        category: categoryMap,
-      };
+      const aiClassificationStats = { priority: priorityMap, risk: riskMap, category: categoryMap };
 
       const totalForDay = Object.values(statusCounts).reduce((sum, n) => sum + (n || 0), 0);
       const statusCountsWithTotal = { ...statusCounts, Total: totalForDay };
 
-      const dateStr = todayYmdMiami; // etiqueta del doc
+      const dateStr = todayYmdMiami;
       const statDoc = {
         id: dateStr,
         date: dateStr,
@@ -187,9 +175,7 @@ app.timer('processTicketStats', {
 
       if (DailyStatsOutput) {
         const { error: dtoErr } = DailyStatsOutput.validate(statDoc, { abortEarly: false });
-        if (dtoErr) {
-          context.log.error('Stats DTO validation failed:', dtoErr.details);
-        }
+        if (dtoErr) context.log.error('Stats DTO validation failed:', dtoErr.details);
       }
 
       await statsContainer.items.upsert(statDoc);
