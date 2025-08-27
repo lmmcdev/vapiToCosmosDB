@@ -24,7 +24,6 @@ const ALLOWED_STATUSES = DTO_ALLOWED_STATUSES || [
   'Duplicated',
 ];
 
-// Normalización de estados
 const STATUS_ALIASES = {
   'new': 'New',
   'in progress': 'In Progress',
@@ -46,39 +45,43 @@ app.timer('processTicketStats', {
       const ticketContainer = getContainer();
       const statsContainer = getStatsContainer();
 
-      // 1) Rango del día en Miami
-      const startOfDay = dayjs().tz(MIAMI_TZ).startOf('day');
-      const endOfDay   = dayjs().tz(MIAMI_TZ).endOf('day');
+      // 👇 Día objetivo (etiqueta) en Miami
+      const todayYmdMiami = dayjs().tz(MIAMI_TZ).format('YYYY-MM-DD');
 
-      const startIso = startOfDay.toISOString();
-      const endIso   = endOfDay.toISOString();
-
-      // 2) Query por rango en creation_date (ISO con offset)
+      // 👇 IMPORTANTE:
+      // En vez de comparar rangos ISO (que se rompen con offsets),
+      // traemos los documentos cuyo string empieza por "YYYY-MM-DD"
+      // tanto en creation_date como en createdAt.
       const { resources: tickets } = await ticketContainer.items
         .query({
           query: `
             SELECT * FROM c
-            WHERE c.creation_date >= @start
-              AND c.creation_date <= @end
+            WHERE
+              (
+                IS_STRING(c.creation_date) AND STARTSWITH(c.creation_date, @ymd)
+              )
+              OR
+              (
+                IS_STRING(c.createdAt) AND STARTSWITH(c.createdAt, @ymd)
+              )
           `,
           parameters: [
-            { name: '@start', value: startIso },
-            { name: '@end', value: endIso },
+            { name: '@ymd', value: todayYmdMiami },
           ],
         })
         .fetchAll();
 
-      context.log(`Tickets found for ${dayjs().tz(MIAMI_TZ).format('YYYY-MM-DD')}: ${tickets.length}`);
+      context.log(`Tickets (string-day=${todayYmdMiami}) encontrados: ${tickets.length}`);
 
-      // 3) Acumuladores
+      // Acumuladores
       let globalTotalTime = 0;
       let resolvedCount = 0;
 
-      const agentStatsMap = {};
-      const hourlyMap = {};
-      const priorityMap = {};
-      const riskMap = {};
-      const categoryMap = {};
+      const agentStatsMap = {}; // { [agentEmail]: { totalTime, resolved } }
+      const hourlyMap = {};     // { [hour]: count }
+      const priorityMap = {};   // { [priority]: {count, ticketIds[]} }
+      const riskMap = {};       // { [risk]: {count, ticketIds[]} }
+      const categoryMap = {};   // { [category]: {count, ticketIds[]} }
 
       const statusCounts = ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {});
 
@@ -88,65 +91,65 @@ app.timer('processTicketStats', {
         return STATUS_ALIASES[key] || null;
       };
 
-      // 4) Procesamiento ticket por ticket
-      for (const ticket of tickets) {
-        // 🔹 Parse creation_date/createdAt en TZ Miami
-        const created = ticket?.createdAt
-          ? dayjs(ticket.createdAt).tz(MIAMI_TZ)
-          : (ticket?.creation_date ? dayjs(ticket.creation_date).tz(MIAMI_TZ) : null);
+      for (const t of tickets) {
+        // ⚠️ "Wall clock" en Miami (NO mover el reloj, sólo re-anclar):
+        // tz(_, MIAMI_TZ, true) mantiene la hora del string tal cual.
+        const src = t?.createdAt || t?.creation_date;
+        const createdMiamiWall = src ? dayjs(src).tz(MIAMI_TZ, true) : null;
 
-        if (created && created.isValid()) {
-          const hour = created.hour();
+        if (createdMiamiWall?.isValid()) {
+          // Hora local “visible” (7am queda 7)
+          const hour = createdMiamiWall.hour();
           hourlyMap[hour] = (hourlyMap[hour] || 0) + 1;
         }
 
-        // Estado normalizado
-        const normStatus = normalizeStatus(ticket?.status);
+        // Estado
+        const normStatus = normalizeStatus(t?.status);
         if (normStatus && Object.prototype.hasOwnProperty.call(statusCounts, normStatus)) {
           statusCounts[normStatus] += 1;
         }
 
-        // 🔹 Parse closedAt en TZ Miami
-        const closed = ticket?.closedAt ? dayjs(ticket.closedAt).tz(MIAMI_TZ) : null;
-        if (created && closed && closed.isValid()) {
-          const diffMins = closed.diff(created, 'minute');
+        // Tiempos de resolución (si tienes closedAt)
+        const closedSrc = t?.closedAt || null;
+        const closedMiamiWall = closedSrc ? dayjs(closedSrc).tz(MIAMI_TZ, true) : null;
+        if (createdMiamiWall?.isValid() && closedMiamiWall?.isValid()) {
+          const diffMins = closedMiamiWall.diff(createdMiamiWall, 'minute');
           if (diffMins >= 0) {
             globalTotalTime += diffMins;
             resolvedCount += 1;
 
-            const agent = (ticket.agent_assigned || 'unassigned').toLowerCase();
+            const agent = (t.agent_assigned || 'unassigned').toLowerCase();
             if (!agentStatsMap[agent]) agentStatsMap[agent] = { totalTime: 0, resolved: 0 };
             agentStatsMap[agent].totalTime += diffMins;
             agentStatsMap[agent].resolved += 1;
           }
         }
 
-        // IA: prioridad / riesgo / categoría
-        if (ticket?.aiClassification) {
-          const { priority, risk, category } = ticket.aiClassification;
+        // IA
+        if (t?.aiClassification) {
+          const { priority, risk, category } = t.aiClassification;
 
           if (priority) {
             const p = String(priority);
             if (!priorityMap[p]) priorityMap[p] = { count: 0, ticketIds: [] };
             priorityMap[p].count += 1;
-            if (ticket.id) priorityMap[p].ticketIds.push(ticket.id);
+            if (t.id) priorityMap[p].ticketIds.push(t.id);
           }
           if (risk) {
             const r = String(risk);
             if (!riskMap[r]) riskMap[r] = { count: 0, ticketIds: [] };
             riskMap[r].count += 1;
-            if (ticket.id) riskMap[r].ticketIds.push(ticket.id);
+            if (t.id) riskMap[r].ticketIds.push(t.id);
           }
           if (category) {
             const c = String(category);
             if (!categoryMap[c]) categoryMap[c] = { count: 0, ticketIds: [] };
             categoryMap[c].count += 1;
-            if (ticket.id) categoryMap[c].ticketIds.push(ticket.id);
+            if (t.id) categoryMap[c].ticketIds.push(t.id);
           }
         }
       }
 
-      // 5) DTO Final
       const agentStats = Object.entries(agentStatsMap).map(([agentEmail, stats]) => ({
         agentEmail,
         avgResolutionTimeMins: stats.resolved ? Math.round(stats.totalTime / stats.resolved) : 0,
@@ -171,7 +174,7 @@ app.timer('processTicketStats', {
       const totalForDay = Object.values(statusCounts).reduce((sum, n) => sum + (n || 0), 0);
       const statusCountsWithTotal = { ...statusCounts, Total: totalForDay };
 
-      const dateStr = dayjs().tz(MIAMI_TZ).format('YYYY-MM-DD');
+      const dateStr = todayYmdMiami; // etiqueta del doc
       const statDoc = {
         id: dateStr,
         date: dateStr,
@@ -182,7 +185,6 @@ app.timer('processTicketStats', {
         aiClassificationStats,
       };
 
-      // 6) Validación DTO
       if (DailyStatsOutput) {
         const { error: dtoErr } = DailyStatsOutput.validate(statDoc, { abortEarly: false });
         if (dtoErr) {
@@ -190,12 +192,10 @@ app.timer('processTicketStats', {
         }
       }
 
-      // 7) Upsert Cosmos
       await statsContainer.items.upsert(statDoc);
       context.log('Stats upserted to Cosmos successfully');
 
-      // 8) Opcional: Broadcast por SignalR
-      const signalrDailyStats = process.env.SIGNALR_SEND_GROUPS;
+      const signalrDailyStats = process.env.SIGNALR_SEND_TO_GROUPS;
       if (signalrDailyStats) {
         try {
           const resp = await fetch(signalrDailyStats, {
