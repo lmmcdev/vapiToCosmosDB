@@ -8,20 +8,12 @@ const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updateTicketNotesInput } = require('./dtos/input.schema');
 const { getMiamiNow } = require('./helpers/timeHelper');
 
-
 // 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+const { getEmailFromClaims } = require('./auth/auth.helper');
 
-// Ajusta al módulo que corresponda
-const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
-} = GROUPS.REFERRALS;
-
-//const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+const lc = (s) => (s || '').toLowerCase();
 
 app.http('cosmoUpdateNotes', {
   route: 'cosmoUpdateNotes',
@@ -38,14 +30,7 @@ app.http('cosmoUpdateNotes', {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      // 2) Rol efectivo por grupos (supervisor/agent)
-      const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-      });
-      // No exigimos rol específico; lo usamos para permitir a supervisores
-
-      // 3) Validar entrada (DTO)
+      // 2) Validar entrada con DTO
       let body;
       try {
         body = await request.json();
@@ -62,11 +47,11 @@ app.http('cosmoUpdateNotes', {
         return badRequest(details);
       }
 
-      const ticketId = value.ticketId || value.tickets; // soporta ambos campos
+      const ticketId = value.ticketId || value.tickets;
       const notes    = Array.isArray(value.notes) ? value.notes : [];
       const event    = value.event;
 
-      // 4) Leer ticket
+      // 3) Leer ticket
       const container = getContainer();
       const item = container.item(ticketId, ticketId);
       let existing;
@@ -77,25 +62,24 @@ app.http('cosmoUpdateNotes', {
       }
       if (!existing) return notFound('Ticket not found.');
 
-      // 5) Autorización: asignado, colaborador o supervisor
-      const lc = (s) => (s || '').toLowerCase();
+      // 4) Autorización contextual: asignado, colaborador o supervisor
       const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
-      const isCollaborator = Array.isArray(existing.collaborators)
-        && existing.collaborators.map(lc).includes(lc(actor_email));
-      const isSupervisor = role === 'supervisor';
+      const isCollaborator =
+        Array.isArray(existing.collaborators) &&
+        existing.collaborators.map(lc).includes(lc(actor_email));
 
-      if (!isAssigned && !isCollaborator && !isSupervisor) {
+      // 👇 Dado que todos los grupos tienen acceso, basta con ser assigned/collaborator.
+      if (!isAssigned && !isCollaborator) {
         return badRequest('You do not have permission to update notes on this ticket.');
       }
 
-      // 6) Construir operaciones PATCH
+      // 5) Construir operaciones PATCH
       const patchOps = [];
 
       if (!Array.isArray(existing.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
-      // Añadir notas de usuario (normalizadas)
       if (notes.length > 0) {
         for (const note of notes) {
           const safeNote = {
@@ -106,8 +90,6 @@ app.http('cosmoUpdateNotes', {
           };
           patchOps.push({ op: 'add', path: '/notes/-', value: safeNote });
         }
-
-        // Log del sistema por lote de notas
         patchOps.push({
           op: 'add',
           path: '/notes/-',
@@ -120,7 +102,6 @@ app.http('cosmoUpdateNotes', {
         });
       }
 
-      // Mensaje de sistema puntual (opcional)
       if (event) {
         patchOps.push({
           op: 'add',
@@ -138,7 +119,7 @@ app.http('cosmoUpdateNotes', {
         return badRequest('No valid operations to apply.');
       }
 
-      // 7) Aplicar patch y releer
+      // 6) Aplicar patch y releer
       try {
         await item.patch(patchOps);
         ({ resource: existing } = await item.read());
@@ -146,36 +127,17 @@ app.http('cosmoUpdateNotes', {
         return error('Error updating notes.', 500, e.message);
       }
 
-      // 8) Formatear DTO
-      let formattedDto;
-      try {
-        formattedDto = validateAndFormatTicket(existing, badRequest, context);
-      } catch (badReq) {
-        return badReq;
-      }
+      // 7) Formatear DTO
+      const formattedDto = validateAndFormatTicket(existing, badRequest, context);
 
-      // 9) Notificar via SignalR (best-effort)
-      /*if (signalRUrl) {
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
-      }*/
-
-      // 10) Respuesta final (ticket completo)
-      return success('Operation successfull', formattedDto);
+      return success('Operation successful', formattedDto);
     } catch (e) {
       context.log('❌ cosmoUpdateNotes error:', e);
       return error('Unexpected error updating notes.', 500, e.message);
     }
   }, {
-    // 🔐 Auth a nivel de endpoint
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    // ✅ todos los grupos de todos los módulos
+    groupsAny: Object.values(GROUPS).flatMap(mod => Object.values(mod)),
   })
 });

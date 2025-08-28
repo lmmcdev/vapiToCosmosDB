@@ -1,13 +1,12 @@
 // functions/cosmoUpdateAiClassification/index.js (CommonJS)
 const { app } = require('@azure/functions');
-
 const { getContainer } = require('../shared/cosmoClient');
 const { success, error, badRequest, notFound } = require('../shared/responseUtils');
 
 // Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+const { getEmailFromClaims } = require('./auth/auth.helper');
 
 // Hora Miami
 const { getMiamiNow } = require('./helpers/timeHelper');
@@ -15,15 +14,8 @@ const { getMiamiNow } = require('./helpers/timeHelper');
 // DTO formatter tolerante
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 
-// ✅ Schemas (separados del endpoint)
+// ✅ Schemas
 const { updateAiClassificationInput } = require('./dtos/input.schema');
-
-// 🔐 Grupos Referrals
-const {
-  ACCESS_GROUP: GROUP_CUSTOMER_SERVICE,
-  SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
-  AGENTS_GROUP: GROUP_CSERV_AGENTS,
-} = GROUPS.REFERRALS;
 
 // ----------------- Utils -----------------
 const sanitizeAi = (inObj = {}) => {
@@ -53,22 +45,14 @@ app.http('cosmoUpdateAiClassification', {
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
-      // 1) Claims y autorización
+      // 1) Actor
       const claims = context.user || {};
       const actor_email = getEmailFromClaims(claims);
       if (!actor_email) {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
-        AGENTS_GROUP: GROUP_CSERV_AGENTS,
-      });
-      if (!role || (role !== 'supervisor' && role !== 'agent')) {
-        return { status: 403, jsonBody: { error: 'Insufficient permissions (agents/supervisors only)' } };
-      }
-
-      // 2) Body (validado con Joi externo)
+      // 2) Body
       let body;
       try {
         body = await req.json();
@@ -87,10 +71,10 @@ app.http('cosmoUpdateAiClassification', {
 
       const ticketId = input.ticketId;
 
-      // merge parcial: objeto + campos sueltos
+      // merge parcial
       const patchIn = sanitizeAi({
         ...(input.aiClassification || {}),
-        ...(['priority','risk','category'].reduce((acc, k) => {
+        ...(['priority', 'risk', 'category'].reduce((acc, k) => {
           if (input[k] !== undefined) acc[k] = input[k];
           return acc;
         }, {})),
@@ -99,7 +83,7 @@ app.http('cosmoUpdateAiClassification', {
         return badRequest('Nothing to update in aiClassification.');
       }
 
-      // 3) Leer ticket actual
+      // 3) Leer ticket
       const container = getContainer();
       const item = container.item(ticketId, ticketId);
 
@@ -109,7 +93,6 @@ app.http('cosmoUpdateAiClassification', {
       const prevAI = existing.aiClassification || {};
       const nextAI = { ...prevAI, ...patchIn };
 
-      // Si no hay cambios reales, devolver 200 sin patch
       if (deepEqual(prevAI, nextAI)) {
         const dto = validateAndFormatTicket(existing, badRequest, context, { strict: false });
         return success('No changes in aiClassification', dto, 200);
@@ -122,14 +105,12 @@ app.http('cosmoUpdateAiClassification', {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
       }
 
-      // upsert aiClassification
       patchOps.push({
         op: existing.aiClassification ? 'replace' : 'add',
         path: '/aiClassification',
         value: nextAI,
       });
 
-      // nota de sistema
       patchOps.push({
         op: 'add',
         path: '/notes/-',
@@ -137,44 +118,31 @@ app.http('cosmoUpdateAiClassification', {
           datetime: miamiUTC,
           event_type: 'system_log',
           agent_email: actor_email,
-          event: `AI classification updated: ${buildChangeSummary(prevAI, nextAI)}`
-        }
+          event: `AI classification updated: ${buildChangeSummary(prevAI, nextAI)}`,
+        },
       });
 
       // 4) Patch + reread
-      let sessionToken;
-      try {
-        const patchRes = await item.patch(patchOps);
-        sessionToken = patchRes?.headers?.['x-ms-session-token'];
-      } catch (e) {
-        return error('Failed to update aiClassification', 500, e.message);
-      }
-
       let updated;
       try {
-        const readOpts = sessionToken ? { sessionToken } : { consistencyLevel: 'Strong' };
-        const { resource } = await item.read(readOpts);
+        await item.patch(patchOps);
+        const { resource } = await item.read();
         updated = resource;
       } catch (e) {
-        updated = { ...existing, aiClassification: nextAI }; // fallback
+        context.log('⚠️ Patch failed, fallback to merged DTO:', e.message);
+        updated = { ...existing, aiClassification: nextAI };
       }
 
       // 5) DTO salida
-      let dto;
-      try {
-        dto = validateAndFormatTicket(updated, badRequest, context, { strict: false });
-      } catch (badReq) {
-        return badReq;
-      }
-
+      const dto = validateAndFormatTicket(updated, badRequest, context, { strict: false });
       return success('AI classification updated', dto);
     } catch (err) {
       context.log('❌ Error updating aiClassification:', err);
       return error('Internal Server Error', 500, err?.message || 'Unknown');
     }
   }, {
-    // ✔️ Token válido y acceso al módulo
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_CUSTOMER_SERVICE], // puerta de entrada al módulo Referrals
+    // ✅ Todos los grupos (de todos los módulos) pueden acceder
+    groupsAny: Object.values(GROUPS).flatMap(mod => Object.values(mod)),
   })
 });

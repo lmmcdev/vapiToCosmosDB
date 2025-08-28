@@ -1,25 +1,15 @@
 // src/functions/cosmoUpdatePatientPhone/index.js (CommonJS)
-const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
-
 const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updatePatientPhoneInput } = require('./dtos/input.schema');
 const { getMiamiNow } = require('./helpers/timeHelper');
 
+// 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
-
-const DEPARTMENT = 'Referrals';
-
-const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo necesitas luego
-} = GROUPS.REFERRALS;
-
+const { getEmailFromClaims } = require('./auth/auth.helper');
 
 app.http('cosmoUpdatePatientPhone', {
   route: 'cosmoUpdatePatientPhone',
@@ -36,16 +26,7 @@ app.http('cosmoUpdatePatientPhone', {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      // 2) Rol efectivo por grupos
-      const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-      });
-      if (!role) {
-        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
-      }
-
-      // 3) Validar entrada (DTO)
+      // 2) Parse + valida entrada (DTO)
       let body;
       try {
         body = await request.json();
@@ -62,10 +43,10 @@ app.http('cosmoUpdatePatientPhone', {
         return badRequest(details);
       }
 
-      const ticketId = value.tickets;      // tu DTO define 'tickets'
-      const new_phone = value.new_phone;   // del DTO
+      const ticketId = value.tickets;
+      const new_phone = value.new_phone;
 
-      // 4) Leer ticket
+      // 3) Leer ticket
       const container = getContainer();
       const item = container.item(ticketId, ticketId);
       let existing;
@@ -76,30 +57,30 @@ app.http('cosmoUpdatePatientPhone', {
       }
       if (!existing) return notFound('Ticket not found.');
 
-      // (Opcional) 5) Verificar departamento
-      if (existing.assigned_department && existing.assigned_department !== DEPARTMENT) {
-        return badRequest(
-          `Ticket department (${existing.assigned_department}) does not match endpoint department (${DEPARTMENT}).`
-        );
-      }
-
-      // 6) Autorización: asignado, colaborador o supervisor
+      // 4) Autorización: asignado, colaborador o supervisor
       const lc = (s) => (s || '').toLowerCase();
       const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
-      const isCollaborator = Array.isArray(existing.collaborators)
-        && existing.collaborators.map(lc).includes(lc(actor_email));
-      const isSupervisor = role === 'supervisor';
+      const isCollaborator =
+        Array.isArray(existing.collaborators) &&
+        existing.collaborators.map(lc).includes(lc(actor_email));
+      const isSupervisor =
+        Array.isArray(claims.groups) &&
+        claims.groups.some(g =>
+          g.toLowerCase().includes('supervisor') // simplificación
+        );
 
       if (!isAssigned && !isCollaborator && !isSupervisor) {
         return badRequest("You do not have permission to update this ticket's callback number.");
       }
 
-      // 7) Construir patchOps
-      const patchOps = [{
-        op: existing.callback_number === undefined ? 'add' : 'replace',
-        path: '/callback_number',
-        value: new_phone,
-      }];
+      // 5) Construir patchOps
+      const patchOps = [
+        {
+          op: existing.callback_number === undefined ? 'add' : 'replace',
+          path: '/callback_number',
+          value: new_phone,
+        },
+      ];
 
       if (!Array.isArray(existing.notes)) {
         patchOps.push({ op: 'add', path: '/notes', value: [] });
@@ -115,7 +96,7 @@ app.http('cosmoUpdatePatientPhone', {
         },
       });
 
-      // 8) Aplicar patch y releer
+      // 6) Aplicar patch y releer
       try {
         await item.patch(patchOps);
         ({ resource: existing } = await item.read());
@@ -123,7 +104,7 @@ app.http('cosmoUpdatePatientPhone', {
         return error('Error updating callback number.', 500, e.message);
       }
 
-      // 9) Validar & formatear salida
+      // 7) DTO salida
       let formattedDto;
       try {
         formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -131,15 +112,14 @@ app.http('cosmoUpdatePatientPhone', {
         return badReq;
       }
 
-      // 11) Responder con ticket completo
-      return success('Operation successfull', formattedDto);
+      return success('Operation successful', formattedDto);
     } catch (e) {
       context.log('❌ cosmoUpdatePatientPhone error:', e);
       return error('Unexpected error updating callback number.', 500, e.message);
     }
   }, {
-    // Auth: scope + grupo de acceso del módulo
+    // 🔐 Cualquier usuario logueado de cualquier grupo
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: Object.values(GROUPS).flatMap(Object.values),
   })
 });

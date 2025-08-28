@@ -1,28 +1,15 @@
 // src/functions/cosmoUpdateStatus/index.js (CommonJS)
-const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
-
 const { getContainer } = require('../shared/cosmoClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updateTicketStatusInput } = require('./dtos/input.schema');
 const { getMiamiNow } = require('./helpers/timeHelper');
 
+// 🔐 Auth
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
-
-const DEPARTMENT = 'Referrals';
-
-const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
-} = GROUPS.REFERRALS;
-
-//const signalRUrl      = process.env.SIGNAL_BROADCAST_URL2;
-//const theStatusUrl    = process.env.SIGNAL_BROADCAST_URL3;
-//const signalRClosed   = process.env.SIGNAL_BROADCAST_URL4;
 
 app.http('cosmoUpdateStatus', {
   route: 'cosmoUpdateStatus',
@@ -32,23 +19,24 @@ app.http('cosmoUpdateStatus', {
     try {
       const { dateISO: miamiUTC } = getMiamiNow();
 
-      // 1) Actor desde el token
+      // 1) Actor
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
       if (!actor_email) {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      // 2) Rol efectivo (supervisor/agent) por grupos
+      // 2) Rol efectivo (supervisor/agent)
+      // Nota: aquí seguimos resolviendo roles con cualquier grupo supervisor/agent
       const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+        SUPERVISORS_GROUP: Object.values(GROUPS.SWITCHBOARD || {})?.[1], // si tienes helpers mejores, úsalos
+        AGENTS_GROUP: Object.values(GROUPS.SWITCHBOARD || {})?.[2],
       });
       if (!role) {
-        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
+        return { status: 403, jsonBody: { error: 'User has no role group' } };
       }
 
-      // 3) Parse + valida body con DTO (rol en el contexto para permitir/denegar "Done")
+      // 3) Body + DTO
       let body;
       try {
         body = await request.json();
@@ -59,10 +47,10 @@ app.http('cosmoUpdateStatus', {
       const { error: vErr, value } = updateTicketStatusInput.validate(body, {
         abortEarly: false,
         stripUnknown: true,
-        context: { role }, // 👈 habilita/inhabilita "Done" según rol
+        context: { role },
       });
       if (vErr) {
-        const details = vErr.details?.map(d => d.message).join('; ') || 'Invalid input.';
+        const details = vErr.details?.map(d => d.message).join('; ') || 'Invalid input';
         return badRequest(details);
       }
 
@@ -78,30 +66,24 @@ app.http('cosmoUpdateStatus', {
       }
       if (!existing) return notFound('Ticket not found.');
 
-      // (Opcional) 5) Verificar departamento
-      if (existing.assigned_department && existing.assigned_department !== DEPARTMENT) {
-        return badRequest(
-          `Ticket department (${existing.assigned_department}) does not match endpoint department (${DEPARTMENT}).`
-        );
-      }
-
-      // 6) Autorización: asignado, colaborador o supervisor
+      // 5) Autorización: asignado, colaborador o supervisor
       const lc = (s) => (s || '').toLowerCase();
       const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
-      const isCollaborator = Array.isArray(existing.collaborators)
-        && existing.collaborators.map(lc).includes(lc(actor_email));
+      const isCollaborator =
+        Array.isArray(existing.collaborators) &&
+        existing.collaborators.map(lc).includes(lc(actor_email));
       const isSupervisor = role === 'supervisor';
 
       if (!isAssigned && !isCollaborator && !isSupervisor) {
         return badRequest(`You do not have permission to change this ticket's status.`);
       }
 
-      // 7) Evitar estado duplicado
+      // 6) Evitar estado duplicado
       if ((existing.status || '') === newStatus) {
         return badRequest('New status is the same as current.');
       }
 
-      // 8) Patch ops
+      // 7) PatchOps
       const patchOps = [];
 
       if (!Array.isArray(existing.notes)) {
@@ -132,7 +114,7 @@ app.http('cosmoUpdateStatus', {
         },
       });
 
-      // 9) Aplicar patch y releer
+      // 8) Aplicar patch y releer
       try {
         await item.patch(patchOps);
         ({ resource: existing } = await item.read());
@@ -140,7 +122,7 @@ app.http('cosmoUpdateStatus', {
         return error('Error updating status.', 500, e.message);
       }
 
-      // 10) Formatear salida
+      // 9) Formatear DTO
       let formattedDto;
       try {
         formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -148,41 +130,14 @@ app.http('cosmoUpdateStatus', {
         return badReq;
       }
 
-      // 11) Notificar SignalR (best-effort)
-      /*const notifyUrls = [signalRUrl, theStatusUrl].filter(Boolean);
-      for (const url of notifyUrls) {
-        try {
-          await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log(`⚠️ SignalR failed for ${url}:`, e.message);
-        }
-      }*/
-
-      /*if ((existing.status === 'Done' || newStatus === 'Done') && signalRClosed) {
-        try {
-          await fetch(signalRClosed, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR closedTickets failed:', e.message);
-        }
-      }*/
-
-      // 12) Responder (ticket completo)
-      return success('Operation successfull', formattedDto);
+      return success('Operation successful', formattedDto);
     } catch (e) {
       context.log('❌ cosmoUpdateStatus error:', e);
       return error('Unexpected error updating status.', 500, e.message);
     }
   }, {
-    // Auth: scope + grupo de acceso del módulo
+    // 🔐 Todos los usuarios de todos los grupos
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: Object.values(GROUPS).flatMap(Object.values),
   })
 });

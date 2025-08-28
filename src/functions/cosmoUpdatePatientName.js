@@ -8,20 +8,13 @@ const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { updatePatientNameInput } = require('./dtos/input.schema');
 const { getMiamiNow } = require('./helpers/timeHelper');
 
-
+// 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+const { getEmailFromClaims } = require('./auth/auth.helper');
 
-const DEPARTMENT = 'Referrals';
 
-const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-} = GROUPS.REFERRALS;
-
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
+const lc = (s) => (s || '').toLowerCase();
 
 app.http('cosmoUpdatePatientName', {
   route: 'cosmoUpdatePatientName',
@@ -38,16 +31,7 @@ app.http('cosmoUpdatePatientName', {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      // 2) Rol efectivo por grupos (supervisor/agent)
-      const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS
-      });
-      if (!role) {
-        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
-      }
-
-      // 3) Parse + valida input (DTO)
+      // 2) Parse + valida input (DTO)
       let body;
       try {
         body = await request.json();
@@ -64,10 +48,10 @@ app.http('cosmoUpdatePatientName', {
         return badRequest(details);
       }
 
-      const ticketId = value.tickets; // tu DTO define 'tickets'
+      const ticketId = value.tickets;
       const nuevo_nombreapellido = value.nuevo_nombreapellido;
 
-      // 4) Leer ticket
+      // 3) Leer ticket
       const item = getContainer().item(ticketId, ticketId);
       let existing;
       try {
@@ -77,25 +61,17 @@ app.http('cosmoUpdatePatientName', {
       }
       if (!existing) return notFound('Ticket not found.');
 
-      // (Opcional) 5) Verifica departamento del ticket
-      if (existing.assigned_department && existing.assigned_department !== DEPARTMENT) {
-        return badRequest(
-          `Ticket department (${existing.assigned_department}) does not match endpoint department (${DEPARTMENT}).`
-        );
-      }
-
-      // 6) Autorización: asignado, colaborador o supervisor
-      const lc = (s) => (s || '').toLowerCase();
+      // 4) Autorización contextual: asignado o colaborador
       const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
-      const isCollaborator = Array.isArray(existing.collaborators)
-        && existing.collaborators.map(lc).includes(lc(actor_email));
-      const isSupervisor = role === 'supervisor';
+      const isCollaborator =
+        Array.isArray(existing.collaborators) &&
+        existing.collaborators.map(lc).includes(lc(actor_email));
 
-      if (!isAssigned && !isCollaborator && !isSupervisor) {
+      if (!isAssigned && !isCollaborator) {
         return badRequest('You do not have permission to update the patient name.');
       }
 
-      // 7) Patch
+      // 5) Patch
       const prevName = existing.patient_name ?? 'Unknown';
       const patchOps = [];
 
@@ -125,7 +101,7 @@ app.http('cosmoUpdatePatientName', {
         return error('Failed to update ticket.', 500, e.message);
       }
 
-      // 8) Releer actualizado
+      // 6) Releer actualizado
       let updated;
       try {
         ({ resource: updated } = await item.read());
@@ -133,7 +109,7 @@ app.http('cosmoUpdatePatientName', {
         return error('Error reading updated ticket.', 500, e.message);
       }
 
-      // 9) DTO salida
+      // 7) DTO salida
       let formattedDto;
       try {
         formattedDto = validateAndFormatTicket(updated, badRequest, context);
@@ -141,28 +117,15 @@ app.http('cosmoUpdatePatientName', {
         return badReq;
       }
 
-      // 10) SignalR (best-effort)
-      /*if (signalRUrl) {
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
-      }*/
 
-      // 11) Respuesta final (ticket completo)
-      return success('Operation successfull', formattedDto);
+      return success('Operation successful', formattedDto);
     } catch (e) {
       context.log('❌ cosmoUpdatePatientName error:', e);
       return error('Unexpected error updating patient name.', 500, e.message);
     }
   }, {
-    // Auth: scope + grupo de acceso del módulo
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    // ✅ acceso a todos los grupos definidos en groups.config
+    groupsAny: Object.values(GROUPS).flatMap(mod => Object.values(mod)),
   })
 });
