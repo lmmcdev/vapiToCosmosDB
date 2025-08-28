@@ -14,7 +14,7 @@ const {
   ACCESS_GROUP: GROUP_CUSTOMER_SERVICE,
   SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
   AGENTS_GROUP: GROUP_CSERV_AGENTS,
-} = GROUPS.REFERRALS;
+} = GROUPS.SWITCHBOARD;
 
 // helpers para calcular rango de día en ISO
 const toDayRange = (dateStr) => {

@@ -6,10 +6,10 @@ const { success, error, badRequest } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 
-// === Grupos permitidos: SOLO Supervisores (Referrals) y Quality ===
-const GROUP_REFERRALS_SUPERVISORS = GROUPS?.REFERRALS?.SUPERVISORS_GROUP;
+// === Grupos permitidos: SOLO Supervisores (Switchboard) y Quality ===
+const GROUP_SUPERVISORS = GROUPS?.SWITCHBOARD?.SUPERVISORS_GROUP;
 const GROUP_QUALITY               = GROUPS?.QUALITY?.QUALITY_GROUP;
-const GROUP_REFERRALS_AGENTS      = GROUPS?.REFERRALS.AGENTS_GROUP;      
+const GROUP_AGENTS      = GROUPS?.SWITCHBOARD?.AGENTS_GROUP;
 //const GROUP_REFERRALS_AGENTS      = GROUPS?.REFERRALS.AGENTS_GROUP;
 //const GROUP_REFERRALS_REMOTEAGENTS= GROUPS?.REFERRALS.REMOTEAGENTS_GROUP;      
 
@@ -45,7 +45,7 @@ app.http('searchProviders', {
       // despliega con withAuth mal configurado.
       const claims = context.user || {};
       const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
-      const allowed = tokenGroups.includes(GROUP_REFERRALS_SUPERVISORS) || tokenGroups.includes(GROUP_QUALITY) || tokenGroups.includes(GROUP_REFERRALS_AGENTS);
+      const allowed = tokenGroups.includes(GROUP_SUPERVISORS) || tokenGroups.includes(GROUP_QUALITY) || tokenGroups.includes(GROUP_AGENTS);
       if (!allowed) {
         return { status: 403, jsonBody: { error: 'Insufficient group membership' } };
       }
@@ -109,7 +109,7 @@ app.http('searchProviders', {
   }, {
     // 🔐 Bloqueo principal en withAuth
     // 👉 NO pongas ACCESS_GROUP aquí: solo Supervisores y Quality
-    groupsAny: [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY, GROUP_REFERRALS_AGENTS],
+    groupsAny: [GROUP_SUPERVISORS, GROUP_QUALITY, GROUP_AGENTS],
     //groupsAny: [ACCESS_GROUP, GROUP_QUALITY],
     // (Opcional) Scopes si los usas; si tu withAuth admite scopesAny, puedes añadirlo.
     //scopesAny: ['access_as_user'],

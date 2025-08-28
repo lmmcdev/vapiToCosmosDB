@@ -17,10 +17,10 @@ const { assignAgentInput } = require('./dtos/input.schema');
 const DEPARTMENT = 'Referrals';
 
 const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS
+  ACCESS_GROUP: GROUP_ACCESS,
+  SUPERVISORS_GROUP: GROUP_SUPERVISORS
   //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-} = GROUPS.REFERRALS;
+} = GROUPS.SWITCHBOARD;
 
 
 app.http('assignAgent', {
@@ -41,7 +41,7 @@ app.http('assignAgent', {
 
       // 2) Rol efectivo según grupos (agent o supervisor)
       const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
         //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
       });
       if (!role) {
@@ -128,7 +128,7 @@ app.http('assignAgent', {
     // Reforzamos que el token tenga el scope correcto
     scopesAny: ['access_as_user'],
     // Puerta de entrada al módulo: debe pertenecer al grupo de acceso del módulo
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: [GROUP_ACCESS],
     // No exigimos roles aquí; los resolvemos dinámicamente arriba
   })
 });

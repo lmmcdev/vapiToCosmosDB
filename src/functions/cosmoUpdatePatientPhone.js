@@ -15,10 +15,10 @@ const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 const DEPARTMENT = 'Referrals';
 
 const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo necesitas luego
-} = GROUPS.REFERRALS;
+  ACCESS_GROUP: GROUP_ACCESS,
+  SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+  AGENTS_GROUP: GROUP_AGENTS, // por si lo necesitas luego
+} = GROUPS.SWITCHBOARD;
 
 
 app.http('cosmoUpdatePatientPhone', {
@@ -38,8 +38,8 @@ app.http('cosmoUpdatePatientPhone', {
 
       // 2) Rol efectivo por grupos
       const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+        AGENTS_GROUP: GROUP_AGENTS,
       });
       if (!role) {
         return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
@@ -140,6 +140,6 @@ app.http('cosmoUpdatePatientPhone', {
   }, {
     // Auth: scope + grupo de acceso del módulo
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: [GROUP_ACCESS],
   })
 });

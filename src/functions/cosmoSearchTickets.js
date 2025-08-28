@@ -8,7 +8,7 @@ const { success, error, badRequest } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { searchBodySchema } = require('./dtos/input.schema');
-const { SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS } = GROUPS.REFERRALS;
+const { SUPERVISORS_GROUP: GROUP_SUPERVISORS } = GROUPS.SWITCHBOARD || {};
 
 // --- Config Search ---
 const congnitiveURL = process.env.COGNITIVE_AI_URL;
@@ -111,7 +111,7 @@ app.http('searchTickets', {
     const claims = context.user || {};
     const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
     context.log(`🔒 groups in token: ${JSON.stringify(tokenGroups)}`);
-    if (!tokenGroups.includes(GROUP_REFERRALS_SUPERVISORS)) {
+    if (!tokenGroups.includes(GROUP_SUPERVISORS)) {
       return { status: 403, jsonBody: { error: 'Supervisors only' } };
     }
 
@@ -184,6 +184,6 @@ app.http('searchTickets', {
   }, {
     // 🔐 SOLO supervisores (no ACCESS_GROUP, no AGENTS_GROUP)
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_SUPERVISORS],
+    groupsAny: [GROUP_SUPERVISORS],
   })
 });

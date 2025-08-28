@@ -16,12 +16,11 @@ const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 const DEPARTMENT = 'Referrals';
 
 const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-} = GROUPS.REFERRALS;
+  ACCESS_GROUP: GROUP_ACCESS,
+  SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+  AGENTS_GROUP: GROUP_AGENTS,
+} = GROUPS.SWITCHBOARD;
 
-const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
 app.http('cosmoUpdatePatientName', {
   route: 'cosmoUpdatePatientName',
@@ -40,8 +39,8 @@ app.http('cosmoUpdatePatientName', {
 
       // 2) Rol efectivo por grupos (supervisor/agent)
       const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS
+        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+        AGENTS_GROUP: GROUP_AGENTS
       });
       if (!role) {
         return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
@@ -141,18 +140,6 @@ app.http('cosmoUpdatePatientName', {
         return badReq;
       }
 
-      // 10) SignalR (best-effort)
-      /*if (signalRUrl) {
-        try {
-          await fetch(signalRUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR failed:', e.message);
-        }
-      }*/
 
       // 11) Respuesta final (ticket completo)
       return success('Operation successfull', formattedDto);
@@ -163,6 +150,6 @@ app.http('cosmoUpdatePatientName', {
   }, {
     // Auth: scope + grupo de acceso del módulo
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: [GROUP_ACCESS],
   })
 });

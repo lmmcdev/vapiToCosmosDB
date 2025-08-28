@@ -3,7 +3,7 @@
 // Define aquí los grupos autorizados por módulo.
 // Agrega más módulos según necesites.
 const GROUPS = {
-  REFERRALS: {
+  SWITCHBOARD: {
     ACCESS_GROUP:      'bb7d859f-7032-405c-9dee-73cde7a6fb31', // puerta de entrada al módulo
     SUPERVISORS_GROUP: '4103988e-0a39-4a6c-aa39-e0c1fad5cf95',
     AGENTS_GROUP:      '84a3609f-65c5-4353-b0a8-530e7f22907e',

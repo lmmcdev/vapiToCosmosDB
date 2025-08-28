@@ -9,15 +9,17 @@ const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+const sendSignalREvent = require('./helpers/sendSignalR');
 
+const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
 // DTO de entrada (añádelo a ./dtos/input.schema.js y exporta updateTicketCollaboratorsInput)
 const { updateTicketCollaboratorsInput } = require('./dtos/input.schema');
 
 const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si luego permites agentes
-} = GROUPS.REFERRALS;
+  ACCESS_GROUP: GROUP_ACCESS,
+  SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+  AGENTS_GROUP: GROUP_AGENTS, // por si luego permites agentes
+} = GROUPS.SWITCHBOARD;
 
 //const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
@@ -39,8 +41,8 @@ app.http('cosmoUpdateCollaborators', {
 
       // 2) Rol efectivo (supervisor/agent) a partir de grupos
       const { role, isSupervisor, isAgent } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+        AGENTS_GROUP: GROUP_AGENTS,
       });
       if (!role) {
         return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
@@ -142,7 +144,7 @@ app.http('cosmoUpdateCollaborators', {
         await item.patch(patchOps);
         ({ resource: existing } = await item.read());
       } catch (e) {
-        return error('Failed to update collaborators', 500, e.message);
+        return error('Failed to update collaboratorsbbbb', 500, e.message);
       }
 
       // 11) Formatear DTO de salida y notificar
@@ -154,6 +156,8 @@ app.http('cosmoUpdateCollaborators', {
       }
 
       //await notifySignalR(dto, context);
+      const a = await sendSignalREvent(signalRUrl, `${existing.assigned_department}`, 'agentAssignment', dto);
+      console.log(`department:${existing.assigned_department}`, a.status);
 
       // 12) Responder ticket completo
       return success('Operation successfull', dto);
@@ -163,6 +167,6 @@ app.http('cosmoUpdateCollaborators', {
   }, {
     // 🔐 Protecciones a nivel de endpoint
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: [GROUP_ACCESS],
   })
 });

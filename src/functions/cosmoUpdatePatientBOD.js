@@ -15,10 +15,10 @@ const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 
 // Ajusta al módulo que corresponda
 const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
-} = GROUPS.REFERRALS;
+  ACCESS_GROUP: GROUP_ACCESS,
+  SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+  AGENTS_GROUP: GROUP_AGENTS, // por si lo usas luego
+} = GROUPS.SWITCHBOARD;
 
 const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
@@ -39,8 +39,8 @@ app.http('cosmoUpdatePatientBOD', { // 👈 conservamos el nombre del endpoint t
 
       // 2) Rol efectivo por grupos (supervisor/agent)
       const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+        AGENTS_GROUP: GROUP_AGENTS,
       });
       if (!role) {
         return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
@@ -149,6 +149,6 @@ app.http('cosmoUpdatePatientBOD', { // 👈 conservamos el nombre del endpoint t
   }, {
     // 🔐 Auth a nivel de endpoint
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: [GROUP_ACCESS],
   })
 });

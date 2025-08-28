@@ -15,10 +15,10 @@ const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 const DEPARTMENT = 'Referrals';
 
 const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
-} = GROUPS.REFERRALS;
+  ACCESS_GROUP: GROUP_ACCESS,
+  SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+  AGENTS_GROUP: GROUP_AGENTS, // por si lo usas luego
+} = GROUPS.SWITCHBOARD;
 
 //const signalRUrl      = process.env.SIGNAL_BROADCAST_URL2;
 //const theStatusUrl    = process.env.SIGNAL_BROADCAST_URL3;
@@ -41,8 +41,8 @@ app.http('cosmoUpdateStatus', {
 
       // 2) Rol efectivo (supervisor/agent) por grupos
       const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
+        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
+        AGENTS_GROUP: GROUP_AGENTS,
       });
       if (!role) {
         return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
@@ -148,32 +148,6 @@ app.http('cosmoUpdateStatus', {
         return badReq;
       }
 
-      // 11) Notificar SignalR (best-effort)
-      /*const notifyUrls = [signalRUrl, theStatusUrl].filter(Boolean);
-      for (const url of notifyUrls) {
-        try {
-          await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log(`⚠️ SignalR failed for ${url}:`, e.message);
-        }
-      }*/
-
-      /*if ((existing.status === 'Done' || newStatus === 'Done') && signalRClosed) {
-        try {
-          await fetch(signalRClosed, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formattedDto),
-          });
-        } catch (e) {
-          context.log('⚠️ SignalR closedTickets failed:', e.message);
-        }
-      }*/
-
       // 12) Responder (ticket completo)
       return success('Operation successfull', formattedDto);
     } catch (e) {
@@ -183,6 +157,6 @@ app.http('cosmoUpdateStatus', {
   }, {
     // Auth: scope + grupo de acceso del módulo
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: [GROUP_ACCESS],
   })
 });
