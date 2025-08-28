@@ -1,30 +1,27 @@
-// functions/cosmoGet/index.js (CommonJS)
+// src/functions/cosmoGet/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { success, error, badRequest } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
-const { GROUPS } = require('./auth/groups.config');
-const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
-// DTO helper tolerante
+const { getEmailFromClaims } = require('./auth/auth.helper');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
-
-const DEPARTMENT = 'Referrals';
-
-const {
-  ACCESS_GROUP: GROUP_CUSTOMER_SERVICE,
-  SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
-  AGENTS_GROUP: GROUP_CSERV_AGENTS,
-} = GROUPS.REFERRALS;
+const { resolveUserDepartment } = require('./helpers/resolveDepartment');
+const { GROUPS } = require('./auth/groups.config');
 
 // helpers para calcular rango de día en ISO
-const toDayRange = (dateStr) => {
-  const base = dateStr ? new Date(dateStr) : new Date(); // usa hoy si no se pasa
+function toDayRange(dateStr) {
+  const base = dateStr ? new Date(dateStr) : new Date();
   const from = new Date(base);
   from.setUTCHours(0, 0, 0, 0);
   const to = new Date(base);
   to.setUTCHours(23, 59, 59, 999);
   return { from: from.toISOString(), to: to.toISOString() };
-};
+}
+
+// 🔹 Extraer todos los ACCESS_GROUPs de los departamentos (multi-depto)
+const ALL_ACCESS_GROUPS = Object.values(GROUPS)
+  .map((dept) => dept.ACCESS_GROUP)
+  .filter(Boolean);
 
 app.http('cosmoGet', {
   route: 'cosmoGet',
@@ -34,25 +31,26 @@ app.http('cosmoGet', {
     async (req, context) => {
       try {
         const claims = context.user;
-
-        // 1) Email del token
         const email = getEmailFromClaims(claims);
         if (!email) {
           return { status: 401, jsonBody: { error: 'Email not found in token' } };
         }
 
-        // 2) Rol efectivo
-        const { role } = getRoleGroups(claims, {
-          SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
-          AGENTS_GROUP: GROUP_CSERV_AGENTS,
-        });
-        if (!role) {
-          return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
+        // 🔹 Resolver dinámicamente
+        const { department, role } = resolveUserDepartment(claims);
+        if (!department || !role) {
+          return { status: 403, jsonBody: { error: 'User has no valid department/role' } };
         }
+
+        context.log(`✅ User resolved to department=${department}, role=${role}`);
+
+        //normalize department to lowercase
+        const normalizedDepartment = department.toLowerCase();
+        context.log(`normalized department ${normalizedDepartment}`);
 
         const container = getContainer();
 
-        // 3) Manejo de parámetro "date"
+        // 🔹 Param "date"
         const dateParam = req.query.get('date');
         let dateFilter = '';
         let parameters = [];
@@ -64,9 +62,10 @@ app.http('cosmoGet', {
           parameters.push({ name: '@to', value: to });
         }
 
-        // 4) Query según rol
+        // 🔹 Query según rol
         let query;
-        if (role === 'supervisor') {
+        if (role === 'SUPERVISORS_GROUP') {
+          console.log(`Executing query as supervisor for department: ${department}`);
           query = `
             SELECT *
             FROM c
@@ -74,8 +73,9 @@ app.http('cosmoGet', {
               AND LOWER(c.status) != "done"
               ${dateFilter}
           `;
-          parameters.push({ name: '@department', value: DEPARTMENT });
+          parameters.push({ name: '@department', value: normalizedDepartment });
         } else {
+          console.log(`Executing query as agent/collaborator for department: ${department}`);
           query = `
             SELECT *
             FROM c
@@ -88,15 +88,12 @@ app.http('cosmoGet', {
               ${dateFilter}
           `;
           parameters.push({ name: '@agentEmail', value: email });
-          parameters.push({ name: '@department', value: DEPARTMENT });
+          parameters.push({ name: '@department', value: department });
         }
 
-        // 5) Ejecutar consulta
-        const { resources = [] } = await container.items
-          .query({ query, parameters })
-          .fetchAll();
+        const { resources = [] } = await container.items.query({ query, parameters }).fetchAll();
 
-        // 6) DTO tolerante
+        // 🔹 DTO tolerante
         const final = [];
         for (const t of resources) {
           try {
@@ -115,7 +112,8 @@ app.http('cosmoGet', {
     },
     {
       scopesAny: ['access_as_user'],
-      groupsAny: [GROUP_CUSTOMER_SERVICE],
+      // 👇 acceso permitido a todos los departamentos que tengan ACCESS_GROUP
+      groupsAny: ALL_ACCESS_GROUPS,
     }
   ),
 });
