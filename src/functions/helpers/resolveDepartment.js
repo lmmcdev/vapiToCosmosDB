@@ -14,11 +14,11 @@ function toLowerSafe(x) {
 function resolveUserDepartment(claims) {
   const tokenGroups = Array.isArray(claims?.groups) ? claims.groups.map(toLowerSafe) : [];
 
-  for (const [department, roles] of Object.entries(GROUPS)) {
+  for (const [location, roles] of Object.entries(GROUPS)) {
     for (const [role, groupId] of Object.entries(roles)) {
       if (tokenGroups.includes(toLowerSafe(groupId))) {
         return {
-          department,   // ej. "SWITCHBOARD"
+          location,   // ej. "SWITCHBOARD"
           role,         // ej. "SUPERVISORS" | "AGENTS" | "ACCESS"
           groupId,      // el GUID original
         };
@@ -26,7 +26,7 @@ function resolveUserDepartment(claims) {
     }
   }
 
-  return { department: null, role: null, groupId: null };
+  return { location: null, role: null, groupId: null };
 }
 
 module.exports = { resolveUserDepartment };

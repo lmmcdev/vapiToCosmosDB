@@ -17,6 +17,10 @@ const GROUPS = {
     REMOTEAGENTS_GROUP: 'b5adb985-0d20-4078-916d-126b07fafeda',
   },
 
+  HIALEAHCENTER: {
+    AGENTS_GROUP:      'efef4665-2646-407f-82aa-1d82505f3db5',
+  },
+
   QUALITY: {
     QUALITY_GROUP: '1d48ef41-8e80-46ed-8ff3-3b084dedfb7f'
   }

@@ -37,16 +37,17 @@ app.http('cosmoGet', {
         }
 
         // 🔹 Resolver dinámicamente
-        const { department, role } = resolveUserDepartment(claims);
-        if (!department || !role) {
-          return { status: 403, jsonBody: { error: 'User has no valid department/role' } };
+        const { location, role } = resolveUserDepartment(claims);
+        if (!location || !role) {
+          console.log(location, role)
+          return { status: 403, jsonBody: { error: 'User has no valid location/role' } };
         }
 
-        context.log(`✅ User resolved to department=${department}, role=${role}`);
+        context.log(`✅ User resolved to location=${location}, role=${role}`);
 
-        //normalize department to lowercase
-        const normalizedDepartment = department.toLowerCase();
-        context.log(`normalized department ${normalizedDepartment}`);
+        //normalize location to lowercase
+        const normalizedLocation = location.toLowerCase();
+        context.log(`normalized location ${normalizedLocation}`);
 
         const container = getContainer();
 
@@ -65,30 +66,30 @@ app.http('cosmoGet', {
         // 🔹 Query según rol
         let query;
         if (role === 'SUPERVISORS_GROUP') {
-          console.log(`Executing query as supervisor for department: ${department}`);
+          console.log(`Executing query as supervisor for location: ${location}`);
           query = `
             SELECT *
             FROM c
-            WHERE c.assigned_department = @department
+            WHERE c.caller_id = @location
               AND LOWER(c.status) != "done"
               ${dateFilter}
           `;
-          parameters.push({ name: '@department', value: normalizedDepartment });
+          parameters.push({ name: '@location', value: normalizedLocation });
         } else {
-          console.log(`Executing query as agent/collaborator for department: ${department}`);
+          console.log(`Executing query as agent/collaborator for location: ${location}`);
           query = `
             SELECT *
             FROM c
             WHERE (
                   c.agent_assigned = @agentEmail
-               OR (c.agent_assigned = "" AND c.assigned_department = @department)
+               OR (c.agent_assigned = "" AND c.caller_id = @location)
                OR (IS_ARRAY(c.collaborators) AND ARRAY_CONTAINS(c.collaborators, @agentEmail))
                   )
               AND LOWER(c.status) != "done"
               ${dateFilter}
           `;
           parameters.push({ name: '@agentEmail', value: email });
-          parameters.push({ name: '@department', value: department });
+          parameters.push({ name: '@location', value: normalizedLocation });
         }
 
         const { resources = [] } = await container.items.query({ query, parameters }).fetchAll();
