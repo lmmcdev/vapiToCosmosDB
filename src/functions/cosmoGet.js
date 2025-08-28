@@ -34,7 +34,7 @@ app.http('cosmoGet', {
     async (req, context) => {
       try {
         const claims = context.user;
-      
+
         // 1) Email del token
         const email = getEmailFromClaims(claims);
         if (!email) {
