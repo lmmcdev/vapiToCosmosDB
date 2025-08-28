@@ -6,8 +6,8 @@ const { success, error, badRequest } = require('../shared/responseUtils');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 
-// Grupos permitidos: Supervisores (Switchboard) y Quality
-const { SUPERVISORS_GROUP: GROUP_SUPERVISORS, AGENTS_GROUP: GROUP_AGENTS } = GROUPS.SWITCHBOARD || {};
+// Grupos permitidos: Supervisores (Referrals) y Quality
+const { SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS, AGENTS_GROUP: GROUP_REFERRALS_AGENTS } = GROUPS.REFERRALS || {};
 const { QUALITY_GROUP: GROUP_QUALITY } = (GROUPS.QUALITY || {});
 
 // Cognitive Search (no dejes defaults con secretos en código)
@@ -31,7 +31,7 @@ app.http('searchPatients', {
       // 🔐 Re-chequeo defensivo dentro del handler
       const claims = context.user || {};
       const tokenGroups = Array.isArray(claims.groups) ? claims.groups : [];
-      const allowedGroups = [GROUP_SUPERVISORS, GROUP_QUALITY, GROUP_AGENTS].filter(Boolean);
+      const allowedGroups = [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY, GROUP_REFERRALS_AGENTS].filter(Boolean);
       const inAllowedGroup = allowedGroups.some(g => tokenGroups.includes(g));
       if (!inAllowedGroup) {
         context.log('🚫 Group check (handler) failed. groups:', tokenGroups);
@@ -116,7 +116,7 @@ app.http('searchPatients', {
     // Middleware: sólo si pertenece a Supervisores o Quality
     scopes: ['access_as_user'],
     // (si tu withAuth soporta groupsAny, esto ya corta antes)
-    groupsAny: [GROUP_SUPERVISORS, GROUP_QUALITY, GROUP_AGENTS],
+    groupsAny: [GROUP_REFERRALS_SUPERVISORS, GROUP_QUALITY, GROUP_REFERRALS_AGENTS],
     // Si tu withAuth usa "scopes" y NO "scopesAny", pon:
     
     // (o agrega soporte de scopesAny en withAuth)

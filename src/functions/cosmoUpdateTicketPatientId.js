@@ -14,10 +14,10 @@ const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 
 const {
-  ACCESS_GROUP: GROUP_ACCESS,
-  SUPERVISORS_GROUP: GROUP_SUPERVISORS,
-  AGENTS_GROUP: GROUP_AGENTS, // por si lo usas luego
-} = GROUPS.SWITCHBOARD;
+  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
+} = GROUPS.REFERRALS;
 
 const patientsContainer = getPatientsContainer();
 
@@ -37,8 +37,8 @@ app.http('updateTicketsByPhone', {
 
       // 2) Rol efectivo (supervisor/agent) a partir de grupos
       const { role, isSupervisor, isAgent } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
-        AGENTS_GROUP: GROUP_AGENTS,
+        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
       });
       if (!role) {
         return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
@@ -324,6 +324,6 @@ app.http('updateTicketsByPhone', {
   }, {
     // 🔐 Auth a nivel de endpoint
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_ACCESS],
+    groupsAny: [GROUP_REFERRALS_ACCESS],
   })
 });

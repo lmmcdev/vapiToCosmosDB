@@ -23,7 +23,7 @@ const {
   ACCESS_GROUP: GROUP_CUSTOMER_SERVICE,
   SUPERVISORS_GROUP: GROUP_CSERV_SUPERVISORS,
   AGENTS_GROUP: GROUP_CSERV_AGENTS,
-} = GROUPS.SWITCHBOARD;
+} = GROUPS.REFERRALS;
 
 // ----------------- Utils -----------------
 const sanitizeAi = (inObj = {}) => {

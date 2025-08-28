@@ -9,7 +9,7 @@ const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 // Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const { ACCESS_GROUP: GROUP_ACCESS } = GROUPS.SWITCHBOARD;
+const { ACCESS_GROUP: GROUP_REFERRALS_ACCESS } = GROUPS.REFERRALS;
 
 app.http('cosmoGetByIds', {
   methods: ['POST'],
@@ -78,6 +78,6 @@ app.http('cosmoGetByIds', {
     }
   }, {
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_ACCESS],
+    groupsAny: [GROUP_REFERRALS_ACCESS],
   }),
 });

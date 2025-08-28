@@ -16,10 +16,10 @@ const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 
 // Ajusta al módulo que corresponda
 const {
-  ACCESS_GROUP: GROUP_ACCESS,
-  SUPERVISORS_GROUP: GROUP_SUPERVISORS,
-  AGENTS_GROUP: GROUP_AGENTS, // por si lo usas luego
-} = GROUPS.SWITCHBOARD;
+  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
+} = GROUPS.REFERRALS;
 
 //const signalRUrl = process.env.SIGNAL_BROADCAST_URL2;
 
@@ -40,8 +40,8 @@ app.http('cosmoUpdateNotes', {
 
       // 2) Rol efectivo por grupos (supervisor/agent)
       const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_SUPERVISORS,
-        AGENTS_GROUP: GROUP_AGENTS,
+        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
+        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
       });
       // No exigimos rol específico; lo usamos para permitir a supervisores
 
@@ -154,6 +154,18 @@ app.http('cosmoUpdateNotes', {
         return badReq;
       }
 
+      // 9) Notificar via SignalR (best-effort)
+      /*if (signalRUrl) {
+        try {
+          await fetch(signalRUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formattedDto),
+          });
+        } catch (e) {
+          context.log('⚠️ SignalR failed:', e.message);
+        }
+      }*/
 
       // 10) Respuesta final (ticket completo)
       return success('Operation successfull', formattedDto);
@@ -164,6 +176,6 @@ app.http('cosmoUpdateNotes', {
   }, {
     // 🔐 Auth a nivel de endpoint
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_ACCESS],
+    groupsAny: [GROUP_REFERRALS_ACCESS],
   })
 });

@@ -7,8 +7,8 @@ const { success, badRequest, notFound, error } = require('../shared/responseUtil
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const {
-  SUPERVISORS_GROUP: GROUP_SUPERVISORS, // <- SOLO supervisores
-} = GROUPS.SWITCHBOARD;
+  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS, // <- SOLO supervisores
+} = GROUPS.REFERRALS;
 
 // DTOs
 const { DailyStatsOutput, MonthlyStatsOutput } = require('./dtos/stats.dto');
@@ -49,7 +49,7 @@ app.http('getTicketStats', {
     try {
       // Defensa extra: cortar si el token no trae el grupo de supervisores
       const tokenGroups = Array.isArray(context.user?.groups) ? context.user.groups : [];
-      if (!tokenGroups.includes(GROUP_SUPERVISORS)) {
+      if (!tokenGroups.includes(GROUP_REFERRALS_SUPERVISORS)) {
         return { status: 403, jsonBody: { error: 'Insufficient group membership (supervisors only).' } };
       }
 
@@ -127,6 +127,6 @@ app.http('getTicketStats', {
   }, {
     // Solo SUPERVISORES
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_SUPERVISORS],
+    groupsAny: [GROUP_REFERRALS_SUPERVISORS],
   })
 });
