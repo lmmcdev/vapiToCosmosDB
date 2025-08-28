@@ -30,10 +30,17 @@ app.http('cosmoUpdateCollaborators', {
         }
 
         // 🔹 Resolver departamento dinámico y rol
-        const { department, role, isSupervisor } = resolveUserDepartment(claims);
+        const { department, role } = resolveUserDepartment(claims);
         if (!department || !role) {
           return { status: 403, jsonBody: { error: 'User not authorized for any department' } };
         }
+
+        let isSupervisor = false;
+        if (role === "SUPERVISORS_GROUP") {
+          isSupervisor = true;
+        }
+
+        console.log('User info:', { email: actor_email, department, role, isSupervisor });
 
         // 3) Parse body
         let body;
