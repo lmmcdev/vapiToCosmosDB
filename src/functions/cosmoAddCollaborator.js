@@ -14,6 +14,9 @@ const {
   ACCESS_GROUP: GROUP_SWITCHBOARD_ACCESS,
 } = GROUPS.SWITCHBOARD;
 
+const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
+
+
 const lc = (s) => (s || '').toLowerCase();
 
 app.http('cosmoUpdateCollaborators', {
@@ -34,6 +37,8 @@ app.http('cosmoUpdateCollaborators', {
         if (!department || !role) {
           return { status: 403, jsonBody: { error: 'User not authorized for any department' } };
         }
+
+        const normalizedDepartment = department.toLowerCase();
 
         let isSupervisor = false;
         if (role === "SUPERVISORS_GROUP") {
@@ -120,6 +125,24 @@ app.http('cosmoUpdateCollaborators', {
         } catch (e) {
           return error('Failed to update collaborators', 500, e.message);
         }
+
+         // 8) Notificar por SignalR (grupo por departamento)
+          try {
+            if (signalRUrl) {
+                await fetch(signalRUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      hub: 'ticketshubchannels',
+                      groupName: `department:${normalizedDepartment}`,
+                      target: 'agentAssignment',
+                      payload: existing
+                    })
+                  });
+                }
+              } catch (e) {
+                context.log('⚠️ SignalR notify failed:', e.message);
+              }
 
         // 8) DTO final
         const dto = validateAndFormatTicket(existing, badRequest, context);
