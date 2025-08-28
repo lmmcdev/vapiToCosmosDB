@@ -6,7 +6,6 @@ const { success, badRequest, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { getMiamiNow } = require('./helpers/timeHelper');
 
-
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
@@ -14,121 +13,105 @@ const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 // DTO de entrada
 const { assignAgentInput } = require('./dtos/input.schema');
 
-const DEPARTMENT = 'Referrals';
-
-const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS
-  //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-} = GROUPS.REFERRALS;
-
+// 🔹 Construye lista de TODOS los grupos supervisores de todos los módulos
+const ALL_SUPERVISORS = Object.values(GROUPS)
+  .map(g => g?.SUPERVISORS_GROUP)
+  .filter(Boolean);
 
 app.http('assignAgent', {
   route: 'assignAgent',
   methods: ['PATCH'],
   authLevel: 'anonymous',
-  handler: withAuth(async (request, context) => {
-    try {
-      const { dateISO: miamiUTC } = getMiamiNow();
-
-      const claims = context.user;
-
-      // 1) Email del token (agente que hace la asignación)
-      const agent_email = getEmailFromClaims(claims);
-      if (!agent_email) {
-        return { status: 401, jsonBody: { error: 'Email not found in token' } };
-      }
-
-      // 2) Rol efectivo según grupos (agent o supervisor)
-      const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        //AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-      });
-      if (!role) {
-        return error('User has no role group for this module', 403, 'Error');
-        //return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
-      }
-
-      // 3) Parse + valida body con DTO (ticketId requerido)
-      let body;
+  handler: withAuth(
+    async (request, context) => {
       try {
-        body = await request.json();
-      } catch {
-        return badRequest('Invalid JSON');
-      }
+        const { dateISO: miamiUTC } = getMiamiNow();
+        const claims = context.user;
 
-      const { error: dtoErr, value } = assignAgentInput.validate(body, { abortEarly: false });
-      if (dtoErr) {
-        const details = dtoErr.details?.map(d => d.message).join('; ') || 'Validation error';
-        return badRequest(details);
-      }
-      const { tickets: ticketId, target_agent_email } = value;
+        // 1) Email del actor
+        const actor_email = getEmailFromClaims(claims);
+        if (!actor_email) {
+          return { status: 401, jsonBody: { error: 'Email not found in token' } };
+        }
 
-      // 4) Lee el ticket
-      const container = getContainer();
-      const item = container.item(ticketId, ticketId);
-      let existing;
-      try {
-        ({ resource: existing } = await item.read());
+        // 2) Verificar que sea SUPERVISOR de al menos un módulo
+        let isSupervisor = false;
+        for (const supGroup of ALL_SUPERVISORS) {
+          const { isSupervisor: check } = getRoleGroups(claims, {
+            SUPERVISORS_GROUP: supGroup,
+          });
+          if (check) {
+            isSupervisor = true;
+            break;
+          }
+        }
+        if (!isSupervisor) {
+          return { status: 403, jsonBody: { error: 'Only supervisors can assign agents.' } };
+        }
+
+        // 3) Body
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return badRequest('Invalid JSON');
+        }
+        const { error: dtoErr, value } = assignAgentInput.validate(body, { abortEarly: false });
+        if (dtoErr) {
+          const details = dtoErr.details?.map(d => d.message).join('; ') || 'Validation error';
+          return badRequest(details);
+        }
+        const { tickets: ticketId, target_agent_email } = value;
+
+        // 4) Leer ticket
+        const container = getContainer();
+        const item = container.item(ticketId, ticketId);
+        let existing;
+        try {
+          ({ resource: existing } = await item.read());
+        } catch (e) {
+          return error('Error reading ticket.', 500, e.message);
+        }
+        if (!existing) return badRequest('Ticket not found.');
+
+        // 5) Construir patch
+        const patchOps = [
+          { op: 'replace', path: '/agent_assigned', value: target_agent_email },
+        ];
+        if (!Array.isArray(existing.notes)) {
+          patchOps.push({ op: 'add', path: '/notes', value: [] });
+        }
+        patchOps.push({
+          op: 'add',
+          path: '/notes/-',
+          value: {
+            datetime: miamiUTC,
+            event_type: 'system_log',
+            agent_email: actor_email,
+            event: `Assigned agent: ${target_agent_email}`,
+          },
+        });
+
+        // 6) Aplicar patch y releer
+        try {
+          await item.patch(patchOps);
+          ({ resource: existing } = await item.read());
+        } catch (e) {
+          return error('Error assigning agent.', 500, e.message);
+        }
+
+        // 7) DTO
+        const dto = validateAndFormatTicket(existing, badRequest, context);
+        return success('Agent assigned successfully.', dto);
       } catch (e) {
-        return error('Error reading ticket.', 500, e.message);
+        context.log('❌ assignAgent error:', e);
+        return error('Unexpected error assigning agent.', 500, e?.message || 'Unknown');
       }
-      if (!existing) return badRequest('Ticket not found.');
-
-      // (Opcional) 5) Garantiza que el ticket pertenece al módulo/dep
-      if (existing.assigned_department && existing.assigned_department !== DEPARTMENT) {
-        return badRequest(
-          `Ticket department (${existing.assigned_department}) does not match endpoint department (${DEPARTMENT}).`
-        );
-      }
-
-      // 6) Build patch: asigna el agente del json y agrega nota
-      const patchOps = [
-        { op: 'replace', path: '/agent_assigned', value: target_agent_email },
-      ];
-
-      if (!Array.isArray(existing.notes)) {
-        patchOps.push({ op: 'add', path: '/notes', value: [] });
-      }
-      patchOps.push({
-        op: 'add',
-        path: '/notes/-',
-        value: {
-          datetime: miamiUTC,
-          event_type: 'system_log',
-          agent_email,
-          event: `Assigned agent to the ticket: ${target_agent_email}`,
-        },
-      });
-
-      // 7) Aplica patch y relee
-      try {
-        await item.patch(patchOps);
-        ({ resource: existing } = await item.read());
-      } catch (e) {
-        return error('Error assigning agent.', 500, e.message);
-      }
-
-      // 8) Formatea salida con tu helper DTO
-      let formattedDto;
-      try {
-        formattedDto = validateAndFormatTicket(existing, badRequest, context);
-      } catch (badReq) {
-        return badReq;
-      }
-
-      // 10) Respuesta OK
-      return success('Status updated successfully.', formattedDto);
-      
-    } catch (e) {
-      context.log('❌ assignAgent error:', e);
-      return error('Unexpected error assigning agent.', 500, e.message);
+    },
+    {
+      // 🔐 Protecciones a nivel de endpoint
+      scopesAny: ['access_as_user'],
+      groupsAny: ALL_SUPERVISORS, // solo supervisores de cualquier módulo
     }
-  }, {
-    // Reforzamos que el token tenga el scope correcto
-    scopesAny: ['access_as_user'],
-    // Puerta de entrada al módulo: debe pertenecer al grupo de acceso del módulo
-    groupsAny: [GROUP_REFERRALS_ACCESS],
-    // No exigimos roles aquí; los resolvemos dinámicamente arriba
-  })
+  ),
 });

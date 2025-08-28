@@ -44,6 +44,10 @@ app.http('cosmoGet', {
 
         context.log(`✅ User resolved to department=${department}, role=${role}`);
 
+        //normalize department to lowercase
+        const normalizedDepartment = department.toLowerCase();
+        context.log(`normalized department ${normalizedDepartment}`);
+
         const container = getContainer();
 
         // 🔹 Param "date"
@@ -60,7 +64,8 @@ app.http('cosmoGet', {
 
         // 🔹 Query según rol
         let query;
-        if (role === 'supervisor') {
+        if (role === 'SUPERVISORS_GROUP') {
+          console.log(`Executing query as supervisor for department: ${department}`);
           query = `
             SELECT *
             FROM c
@@ -68,8 +73,9 @@ app.http('cosmoGet', {
               AND LOWER(c.status) != "done"
               ${dateFilter}
           `;
-          parameters.push({ name: '@department', value: department });
+          parameters.push({ name: '@department', value: normalizedDepartment });
         } else {
+          console.log(`Executing query as agent/collaborator for department: ${department}`);
           query = `
             SELECT *
             FROM c

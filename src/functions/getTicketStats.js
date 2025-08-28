@@ -1,4 +1,4 @@
-// /src/functions/cosmoGetStoredStats/index.js (CommonJS)
+// src/functions/cosmoGetStoredStats/index.js (CommonJS)
 const { app } = require('@azure/functions');
 const { getStatsContainer } = require('../shared/cosmoStatsClient');
 const { success, badRequest, notFound, error } = require('../shared/responseUtils');
@@ -6,9 +6,6 @@ const { success, badRequest, notFound, error } = require('../shared/responseUtil
 // Auth
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const {
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS, // <- SOLO supervisores
-} = GROUPS.REFERRALS;
 
 // DTOs
 const { DailyStatsOutput, MonthlyStatsOutput } = require('./dtos/stats.dto');
@@ -16,6 +13,11 @@ const { DailyStatsOutput, MonthlyStatsOutput } = require('./dtos/stats.dto');
 // ------- Helpers -------
 const DATE_RX  = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
 const MONTH_RX = /^\d{4}-\d{2}$/;       // YYYY-MM
+
+// 🔑 Construye lista de TODOS los grupos de supervisores
+const SUPERVISOR_GROUPS = Object.values(GROUPS)
+  .map(mod => mod.SUPERVISORS_GROUP)
+  .filter(Boolean);
 
 async function getByIdViaQuery(container, id, context) {
   const { resources } = await container.items
@@ -29,7 +31,7 @@ async function getByIdViaQuery(container, id, context) {
 }
 
 function validateOrThrowClean(doc, schema, label, context) {
-  const { error: dtoErr, value } = schema.validate(doc); // prefs ya están en el schema
+  const { error: dtoErr, value } = schema.validate(doc);
   if (dtoErr) {
     context.log(`❌ ${label} DTO validation failed:`, dtoErr.details);
     const details = dtoErr.details?.map(d => d.message) || dtoErr.message || 'Schema validation error';
@@ -38,7 +40,7 @@ function validateOrThrowClean(doc, schema, label, context) {
     err.code = 'DTO_VALIDATION';
     throw err;
   }
-  return value; // limpio (sin _rid/_etag/_ts, etc.)
+  return value;
 }
 
 app.http('getTicketStats', {
@@ -47,12 +49,6 @@ app.http('getTicketStats', {
   authLevel: 'anonymous',
   handler: withAuth(async (req, context) => {
     try {
-      // Defensa extra: cortar si el token no trae el grupo de supervisores
-      const tokenGroups = Array.isArray(context.user?.groups) ? context.user.groups : [];
-      if (!tokenGroups.includes(GROUP_REFERRALS_SUPERVISORS)) {
-        return { status: 403, jsonBody: { error: 'Insufficient group membership (supervisors only).' } };
-      }
-
       const statsContainer = getStatsContainer();
 
       // Params
@@ -81,9 +77,6 @@ app.http('getTicketStats', {
           return badRequest('Invalid "month" format. Expected YYYY-MM.');
         }
 
-        // IDs mensuales:
-        //   - "month-YYYY-MM"       (month-to-date)
-        //   - "month-YYYY-MM-final" (cierre)
         const idFinal = `month-${month}-final`;
         const idMTD   = `month-${month}`;
 
@@ -96,7 +89,6 @@ app.http('getTicketStats', {
           return success(`Monthly (${scope}) stats retrieved`, clean);
         }
 
-        // sin scope -> intenta ambos
         const [docFinal, docMTD] = await Promise.all([
           getByIdViaQuery(statsContainer, idFinal, context),
           getByIdViaQuery(statsContainer, idMTD, context),
@@ -120,13 +112,12 @@ app.http('getTicketStats', {
       return badRequest('Provide either "date=YYYY-MM-DD" or "month=YYYY-MM"[&scope=final|mtd].');
     } catch (err) {
       context.log('❌ cosmoGetStoredStats error:', err);
-      const status = err?.code === 'DTO_VALIDATION' ? 500 : 500;
       const details = typeof err?.message === 'string' ? err.message : JSON.stringify(err);
-      return error('Failed to retrieve stored stats', status, details);
+      return error('Failed to retrieve stored stats', 500, details);
     }
   }, {
-    // Solo SUPERVISORES
+    // 🔐 Solo supervisores de cualquier módulo
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_SUPERVISORS],
+    groupsAny: SUPERVISOR_GROUPS,
   })
 });

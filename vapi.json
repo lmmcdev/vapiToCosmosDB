@@ -1,0 +1,13 @@
+
+{"summary":"La llamada fue atendida por el asistente virtual de Las Mercedes Medical Center fuera del horario de atención. El cliente finalizó la llamada antes de proporcionar cualquier información, por lo que no se pudo obtener el motivo de la llamada ni los datos del paciente.",
+"call_cost":"0.0208",
+"url_audio":"https://storage.vapi.ai/44c6c9d5-600f-4b00-92a0-4f1fa44e0dbd-1755713332740-37563311-90b6-4099-8a20-5e7cae87455a-mono.wav",
+"call_reason":"Llamada finalizada por el cliente sin información.",
+"caller_name":null,
+"patient_name":null,
+"phone_number":null,
+"call_duration":"17.01",
+"callback_number":null,
+"patient_date_of_birth":null
+}
+

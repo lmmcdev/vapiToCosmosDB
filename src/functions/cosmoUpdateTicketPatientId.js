@@ -1,6 +1,6 @@
 // src/functions/updateTicketsByPhone/index.js (CommonJS)
-const fetch = require('node-fetch');
 const { app } = require('@azure/functions');
+const fetch = require('node-fetch');
 
 const { getContainer } = require('../shared/cosmoClient');
 const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
@@ -11,13 +11,12 @@ const { getMiamiNow } = require('./helpers/timeHelper');
 // 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+const { getEmailFromClaims } = require('./auth/auth.helper');
 
-const {
-  ACCESS_GROUP: GROUP_REFERRALS_ACCESS,
-  SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-  AGENTS_GROUP: GROUP_REFERRALS_AGENTS, // por si lo usas luego
-} = GROUPS.REFERRALS;
+// 📌 Todos los grupos definidos en groups.config
+const ALL_GROUPS = Object.values(GROUPS)
+  .flatMap(mod => Object.values(mod))
+  .filter(Boolean);
 
 const patientsContainer = getPatientsContainer();
 
@@ -28,6 +27,7 @@ app.http('updateTicketsByPhone', {
   handler: withAuth(async (request, context) => {
     try {
       const { dateISO: miamiUTC } = getMiamiNow();
+
       // 1) Actor desde el token
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
@@ -35,16 +35,7 @@ app.http('updateTicketsByPhone', {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      // 2) Rol efectivo (supervisor/agent) a partir de grupos
-      const { role, isSupervisor, isAgent } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: GROUP_REFERRALS_SUPERVISORS,
-        AGENTS_GROUP: GROUP_REFERRALS_AGENTS,
-      });
-      if (!role) {
-        return { status: 403, jsonBody: { error: 'User has no role group for this module' } };
-      }
-
-      // 3) Parse entrada básica
+      // 2) Parse entrada
       let body;
       try {
         body = await request.json();
@@ -57,26 +48,18 @@ app.http('updateTicketsByPhone', {
         ticket_id,
         phone,
         patient_id,
-      } = body; // agent_email se toma del token
+      } = body;
 
       const container = getContainer();
 
-      // 4) Validaciones de negocio
+      // 3) Validaciones de negocio
       const allowed = ['relateCurrent', 'relatePast', 'relateFuture', 'unlink'];
-      if (!allowed.includes(action)) {
-        return badRequest('Invalid Action.');
-      }
-      if (!patient_id && action !== 'unlink') {
-        return badRequest('Missing required field: patient_id');
-      }
-      if (['relateCurrent', 'unlink'].includes(action) && !ticket_id) {
-        return badRequest('Missing required field: ticket_id');
-      }
-      if (action === 'relatePast' && !phone) {
-        return badRequest('Missing required field: phone');
-      }
+      if (!allowed.includes(action)) return badRequest('Invalid Action.');
+      if (!patient_id && action !== 'unlink') return badRequest('Missing required field: patient_id');
+      if (['relateCurrent', 'unlink'].includes(action) && !ticket_id) return badRequest('Missing required field: ticket_id');
+      if (action === 'relatePast' && !phone) return badRequest('Missing required field: phone');
 
-      // 5) Obtener snapshot paciente (best-effort)
+      // 4) Obtener snapshot paciente (best-effort)
       let linked_patient_snapshot = {};
       if (patient_id && patientsContainer) {
         try {
@@ -95,24 +78,22 @@ app.http('updateTicketsByPhone', {
         }
       }
 
-      // Helpers comunes
+      // Helper lowercase
       const lc = (s) => (s || '').toLowerCase();
 
       // ====== ACTION: relateCurrent ======
       if (action === 'relateCurrent') {
-        // Lee ticket
         const item = container.item(ticket_id, ticket_id);
         const { resource: ticket } = await item.read().catch((e) => {
           throw { _msg: 'Error reading ticket.', err: e };
         });
         if (!ticket) return badRequest('Ticket not found.');
 
-        // Permisos: asignado / colaborador / supervisor
         const isAssigned = lc(ticket.agent_assigned) === lc(actor_email);
-        const isCollaborator = Array.isArray(ticket.collaborators)
-          && ticket.collaborators.map(lc).includes(lc(actor_email));
+        const isCollaborator = Array.isArray(ticket.collaborators) &&
+          ticket.collaborators.map(lc).includes(lc(actor_email));
 
-        if (!isSupervisor && !isAssigned && !isCollaborator) {
+        if (!isAssigned && !isCollaborator) {
           return { status: 403, jsonBody: { error: 'Insufficient permission for relateCurrent.' } };
         }
 
@@ -150,24 +131,14 @@ app.http('updateTicketsByPhone', {
           });
         }
 
-        // Leer actualizado
         const { resource: updatedTicket } = await item.read();
-        // DTO de salida uniforme
         const dto = validateAndFormatTicket(updatedTicket, badRequest, context);
-
-        // Notificar (best-effort)
-        //await notifySignalR(dto, context);
 
         return success('Operation successfull', dto, 201);
       }
 
-      // ====== ACTION: relatePast (bulk) ======
+      // ====== ACTION: relatePast ======
       if (action === 'relatePast') {
-        // Seguridad: solo supervisores
-        if (!isSupervisor) {
-          return { status: 403, jsonBody: { error: 'Only supervisors can run relatePast.' } };
-        }
-
         let updatedCount = 0;
         let continuationToken = null;
 
@@ -224,13 +195,8 @@ app.http('updateTicketsByPhone', {
         return success(`Operation successfull`, { updatedCount }, 201);
       }
 
-      // ====== ACTION: relateFuture (regla para futuros tickets) ======
+      // ====== ACTION: relateFuture ======
       if (action === 'relateFuture') {
-        // Seguridad: solo supervisores
-        if (!isSupervisor) {
-          return { status: 403, jsonBody: { error: 'Only supervisors can create future link rules.' } };
-        }
-
         const ruleContainer = container.database.container('phone_link_rules');
         const ruleId = `rule_${phone}`;
         await ruleContainer.items.upsert({
@@ -243,33 +209,27 @@ app.http('updateTicketsByPhone', {
           created_by: actor_email,
         });
 
-        // Notificación mínima opcional
-        // await notifySignalR({ type: 'future_rule', phone, patient_id }, context);
-
         return success('Operation successfull', { phone, patient_id, ruleId }, 201);
       }
 
       // ====== ACTION: unlink ======
       if (action === 'unlink') {
-        // Lee ticket
         const item = container.item(ticket_id, ticket_id);
         const { resource: ticket } = await item.read().catch((e) => {
           throw { _msg: 'Error reading ticket.', err: e };
         });
         if (!ticket) return badRequest('Ticket not found.');
 
-        // Permisos: asignado / colaborador / supervisor
         const isAssigned = lc(ticket.agent_assigned) === lc(actor_email);
-        const isCollaborator = Array.isArray(ticket.collaborators)
-          && ticket.collaborators.map(lc).includes(lc(actor_email));
+        const isCollaborator = Array.isArray(ticket.collaborators) &&
+          ticket.collaborators.map(lc).includes(lc(actor_email));
 
-        if (!isSupervisor && !isAssigned && !isCollaborator) {
+        if (!isAssigned && !isCollaborator) {
           return { status: 403, jsonBody: { error: 'Insufficient permission for unlink.' } };
         }
 
         const patchOps = [];
 
-        // Helper: setear propiedad a null conservando la key en el documento
         const setNull = (prop) => {
           if (Object.prototype.hasOwnProperty.call(ticket, prop)) {
             patchOps.push({ op: 'replace', path: `/${prop}`, value: null });
@@ -278,11 +238,9 @@ app.http('updateTicketsByPhone', {
           }
         };
 
-        // Dejar en null (no eliminar)
         setNull('patient_id');
         setNull('linked_patient_snapshot');
 
-        // Notas
         if (!Array.isArray(ticket.notes)) {
           patchOps.push({ op: 'add', path: '/notes', value: [] });
         }
@@ -303,7 +261,6 @@ app.http('updateTicketsByPhone', {
           });
         }
 
-        // Releer actualizado y devolver DTO completo
         const { resource: updatedTicket } = await container
           .item(ticket_id, ticket_id)
           .read({ consistencyLevel: 'Strong' });
@@ -312,8 +269,6 @@ app.http('updateTicketsByPhone', {
         return success('Operation successfull', dto, 201);
       }
 
-
-      // Fallback (no debería llegar aquí)
       return badRequest('Unsupported action.');
     } catch (e) {
       if (e && e._msg) {
@@ -322,8 +277,7 @@ app.http('updateTicketsByPhone', {
       return error('Error', 500, e?.message || 'Unknown');
     }
   }, {
-    // 🔐 Auth a nivel de endpoint
     scopesAny: ['access_as_user'],
-    groupsAny: [GROUP_REFERRALS_ACCESS],
+    groupsAny: ALL_GROUPS, // ✅ Todos los grupos de groups.config
   })
 });
