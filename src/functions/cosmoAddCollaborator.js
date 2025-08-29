@@ -8,12 +8,13 @@ const { getEmailFromClaims } = require('./auth/auth.helper');
 const { resolveUserDepartment } = require('./helpers/resolveDepartment');
 const { GROUPS } = require('./auth/groups.config');
 
-const {
-  ACCESS_GROUP: GROUP_SWITCHBOARD_ACCESS,
-} = GROUPS.SWITCHBOARD;
-
-const signalRUrl = process.env.SIGNALR_SEND_TO_USERS; // 👈 usamos el de users
+const signalRUrl = process.env.SIGNALR_SEND_TO_USERS;
 const lc = (s) => (s || '').toLowerCase();
+
+// 🔹 Construimos todos los ACCESS_GROUPS dinámicamente
+const ALL_ACCESS_GROUPS = Object.values(GROUPS)
+  .map((g) => g.ACCESS_GROUP)
+  .filter(Boolean);
 
 app.http('cosmoUpdateCollaborators', {
   route: 'cosmoUpdateCollaborators',
@@ -28,13 +29,10 @@ app.http('cosmoUpdateCollaborators', {
           return { status: 401, jsonBody: { error: 'No email in token' } };
         }
 
-        const { location, role } = resolveUserDepartment(claims);
+        const { location, role, isSupervisor } = resolveUserDepartment(claims);
         if (!location || !role) {
           return { status: 403, jsonBody: { error: 'User not authorized for any location' } };
         }
-
-        let isSupervisor = role === "SUPERVISORS_GROUP";
-        context.log('User info:', { email: actor_email, location, role, isSupervisor });
 
         // --- Parse body
         let body;
@@ -114,20 +112,41 @@ app.http('cosmoUpdateCollaborators', {
           return error('Failed to update collaborators', 500, e.message);
         }
 
-        // --- Notificar a TODOS los colaboradores via SignalR
+        // --- Notificar a todos los colaboradores (nuevos y removidos)
         try {
-          console.log(`Notifying SignalR for users: ${incomingClean.join(', ')}`);
-          if (signalRUrl && Array.isArray(incomingClean) && incomingClean.length) {
-            await fetch(signalRUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                hub: 'ticketshubchannels',
-                userIds: incomingClean, // lista de correos / userId a notificar
-                target: 'agentAssignment',
-                payload: existing,
-              }),
-            });
+          if (signalRUrl) {
+            // Payload base
+            const basePayload = {
+              hub: 'ticketshubchannels',
+              target: 'agentAssignment',
+            };
+
+            // Notificar a los nuevos (added + los que quedaron en la lista final)
+            const notifyActive = [...new Set([...incomingClean])];
+            if (notifyActive.length) {
+              await fetch(signalRUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ...basePayload,
+                  userIds: notifyActive,
+                  payload: existing, // ticket completo
+                }),
+              });
+            }
+
+            // Notificar a los removidos con flag __removed
+            if (removed.length) {
+              await fetch(signalRUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ...basePayload,
+                  userIds: removed,
+                  payload: { ...existing, __removed: true },
+                }),
+              });
+            }
           }
         } catch (e) {
           context.log('⚠️ SignalR notify failed:', e.message);
@@ -142,7 +161,7 @@ app.http('cosmoUpdateCollaborators', {
     },
     {
       scopesAny: ['access_as_user'],
-      groupsAny: [GROUP_SWITCHBOARD_ACCESS],
+      groupsAny: ALL_ACCESS_GROUPS, // 🔓 abierto a todos los grupos
     }
   ),
 });
