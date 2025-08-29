@@ -9,10 +9,14 @@ const { resolveUserDepartment } = require('./helpers/resolveDepartment');
 const { GROUPS } = require('./auth/groups.config');
 const { canModifyTicket } = require('./helpers/canModifyTicketHelper');  // 👈 nuevo helper
 
-// 🔹 Permitir a todos los grupos
-const ALL_ACCESS_GROUPS = Object.values(GROUPS).map((g) => g.ACCESS_GROUP).filter(Boolean);
 
 const signalRUrl = process.env.SIGNALR_SEND_TO_USERS;
+const lc = (s) => (s || '').toLowerCase();
+
+// 🔹 Construimos todos los ACCESS_GROUPS dinámicamente
+const ALL_ACCESS_GROUPS = Object.values(GROUPS)
+  .map((g) => g.ACCESS_GROUP)
+  .filter(Boolean);
 
 app.http('cosmoUpdateCollaborators', {
   route: 'cosmoUpdateCollaborators',
@@ -27,8 +31,10 @@ app.http('cosmoUpdateCollaborators', {
           return { status: 401, jsonBody: { error: 'No email in token' } };
         }
 
-        const { location, role } = resolveUserDepartment(claims);
-        const isSupervisor = role === 'SUPERVISORS_GROUP';
+        const { location, role, isSupervisor } = resolveUserDepartment(claims);
+        if (!location || !role) {
+          return { status: 403, jsonBody: { error: 'User not authorized for any location' } };
+        }
 
         // --- Parse body
         let body;
@@ -52,13 +58,22 @@ app.http('cosmoUpdateCollaborators', {
         }
         if (!existing) return notFound('Ticket not found.');
 
-        // --- 🚨 Usar helper en vez de repetir la lógica
-        if (!canModifyTicket(existing, actor_email, isSupervisor)) {
-          return { status: 403, jsonBody: { error: 'Insufficient permissions to modify this ticket, please contact your supervisor.' } };
+        const isSupervisorV = role === 'SUPERVISORS_GROUP';
+        if (!canModifyTicket(existing, actor_email, isSupervisorV)) {
+          return { status: 403, jsonBody: { error: 'Insufficient permissions to update this ticket' } };
+        }
+
+
+        // --- Permisos
+        const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
+        const isCollaborator = Array.isArray(existing.collaborators) &&
+          existing.collaborators.map(lc).includes(lc(actor_email));
+
+        if (!isSupervisor && !isAssigned && !isCollaborator) {
+          return { status: 403, jsonBody: { error: 'Insufficient permissions' } };
         }
 
         // --- Normalizar lista
-        const lc = (s) => (s || '').toLowerCase();
         const incomingClean = [...new Set(
           collaborators.map(e => lc(String(e).trim())).filter(Boolean)
         )];
@@ -105,20 +120,41 @@ app.http('cosmoUpdateCollaborators', {
           return error('Failed to update collaborators', 500, e.message);
         }
 
-        // --- Notificar a nuevos + removidos
-        const notifyUsers = [...new Set([...added, ...removed])];
+        // --- Notificar a todos los colaboradores (nuevos y removidos)
         try {
-          if (signalRUrl && notifyUsers.length) {
-            await fetch(signalRUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                hub: 'ticketshubchannels',
-                userIds: notifyUsers,
-                target: 'agentAssignment',
-                payload: existing,
-              }),
-            });
+          if (signalRUrl) {
+            // Payload base
+            const basePayload = {
+              hub: 'ticketshubchannels',
+              target: 'agentAssignment',
+            };
+
+            // Notificar a los nuevos (added + los que quedaron en la lista final)
+            const notifyActive = [...new Set([...incomingClean])];
+            if (notifyActive.length) {
+              await fetch(signalRUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ...basePayload,
+                  userIds: notifyActive,
+                  payload: existing, // ticket completo
+                }),
+              });
+            }
+
+            // Notificar a los removidos con flag __removed
+            if (removed.length) {
+              await fetch(signalRUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ...basePayload,
+                  userIds: removed,
+                  payload: { ...existing, __removed: true },
+                }),
+              });
+            }
           }
         } catch (e) {
           context.log('⚠️ SignalR notify failed:', e.message);
@@ -133,7 +169,7 @@ app.http('cosmoUpdateCollaborators', {
     },
     {
       scopesAny: ['access_as_user'],
-      groupsAny: ALL_ACCESS_GROUPS, // 👈 ahora todos los grupos tienen acceso
+      groupsAny: ALL_ACCESS_GROUPS, // 🔓 abierto a todos los grupos
     }
   ),
 });
