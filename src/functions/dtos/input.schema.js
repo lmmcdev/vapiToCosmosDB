@@ -28,7 +28,7 @@ const updatePatientNameInput = Joi.object({
 const updateTicketStatusInput = Joi.object({
   ticketId: Joi.string().uuid().required().label('ticketId'),
   newStatus: Joi.alternatives().conditional('$role', {
-    is: 'supervisor',
+    is: 'SUPERVISORS_GROUP',
     then: Joi.string().valid(...SUPERVISOR_STATUSES).required(),
     otherwise: Joi.string().valid(...BASE_STATUSES).required(),
   }).label('newStatus'),

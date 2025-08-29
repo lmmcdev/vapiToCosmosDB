@@ -44,7 +44,10 @@ app.http('cosmoUpdateStatus', {
         return badRequest('Invalid JSON.');
       }
 
+      const { role } = resolveUserDepartment(claims) || {};
+
       const { error: vErr, value } = updateTicketStatusInput.validate(body, {
+        context: { role },
         abortEarly: false,
         stripUnknown: true,
       });
@@ -66,7 +69,6 @@ app.http('cosmoUpdateStatus', {
       if (!existing) return notFound('Ticket not found.');
 
       //3.1 can modify?
-      const { role } = resolveUserDepartment(claims) || {};
       const isSupervisorV = role === 'SUPERVISORS_GROUP';
       if (!canModifyTicket(existing, actor_email, isSupervisorV)) {
         return { status: 403, jsonBody: { error: 'Insufficient permissions to update this ticket' } };
