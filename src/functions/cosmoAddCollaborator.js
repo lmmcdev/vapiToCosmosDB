@@ -3,8 +3,6 @@ const { app } = require('@azure/functions');
 const { getContainer } = require('../shared/cosmoClient');
 const { success, error, badRequest, notFound } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
-
-// 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { getEmailFromClaims } = require('./auth/auth.helper');
 const { resolveUserDepartment } = require('./helpers/resolveDepartment');
@@ -14,9 +12,7 @@ const {
   ACCESS_GROUP: GROUP_SWITCHBOARD_ACCESS,
 } = GROUPS.SWITCHBOARD;
 
-const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
-
-
+const signalRUrl = process.env.SIGNALR_SEND_TO_USERS; // 👈 usamos el de users
 const lc = (s) => (s || '').toLowerCase();
 
 app.http('cosmoUpdateCollaborators', {
@@ -32,22 +28,15 @@ app.http('cosmoUpdateCollaborators', {
           return { status: 401, jsonBody: { error: 'No email in token' } };
         }
 
-        // 🔹 Resolver departamento dinámico y rol
-        const { department, role } = resolveUserDepartment(claims);
-        if (!department || !role) {
-          return { status: 403, jsonBody: { error: 'User not authorized for any department' } };
+        const { location, role } = resolveUserDepartment(claims);
+        if (!location || !role) {
+          return { status: 403, jsonBody: { error: 'User not authorized for any location' } };
         }
 
-        const normalizedDepartment = department.toLowerCase();
+        let isSupervisor = role === "SUPERVISORS_GROUP";
+        context.log('User info:', { email: actor_email, location, role, isSupervisor });
 
-        let isSupervisor = false;
-        if (role === "SUPERVISORS_GROUP") {
-          isSupervisor = true;
-        }
-
-        console.log('User info:', { email: actor_email, department, role, isSupervisor });
-
-        // 3) Parse body
+        // --- Parse body
         let body;
         try {
           body = await req.json();
@@ -58,7 +47,7 @@ app.http('cosmoUpdateCollaborators', {
         const { ticketId, collaborators = [] } = body;
         if (!ticketId) return badRequest('ticketId is required');
 
-        // 4) Buscar ticket
+        // --- Buscar ticket
         const container = getContainer();
         const item = container.item(ticketId, ticketId);
         let existing;
@@ -69,7 +58,7 @@ app.http('cosmoUpdateCollaborators', {
         }
         if (!existing) return notFound('Ticket not found.');
 
-        // 5) Autorización contextual: Supervisor, agente asignado o colaborador actual
+        // --- Permisos
         const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
         const isCollaborator = Array.isArray(existing.collaborators) &&
           existing.collaborators.map(lc).includes(lc(actor_email));
@@ -78,12 +67,11 @@ app.http('cosmoUpdateCollaborators', {
           return { status: 403, jsonBody: { error: 'Insufficient permissions' } };
         }
 
-        // 6) Normalizar lista
+        // --- Normalizar lista
         const incomingClean = [...new Set(
           collaborators.map(e => lc(String(e).trim())).filter(Boolean)
         )];
 
-        // No permitir que el agente asignado esté en colaboradores
         const assignedAgent = lc(existing.agent_assigned);
         if (assignedAgent && incomingClean.includes(assignedAgent)) {
           return badRequest(`Assigned agent (${assignedAgent}) cannot be a collaborator.`);
@@ -100,7 +88,7 @@ app.http('cosmoUpdateCollaborators', {
           return badRequest('No changes to collaborators.');
         }
 
-        // 7) Patch
+        // --- Patch
         const patchOps = [
           {
             op: Array.isArray(existing.collaborators) ? 'replace' : 'add',
@@ -126,25 +114,26 @@ app.http('cosmoUpdateCollaborators', {
           return error('Failed to update collaborators', 500, e.message);
         }
 
-         // 8) Notificar por SignalR (grupo por departamento)
-          try {
-            if (signalRUrl) {
-                await fetch(signalRUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      hub: 'ticketshubchannels',
-                      groupName: `department:${normalizedDepartment}`,
-                      target: 'agentAssignment',
-                      payload: existing
-                    })
-                  });
-                }
-              } catch (e) {
-                context.log('⚠️ SignalR notify failed:', e.message);
-              }
+        // --- Notificar a TODOS los colaboradores via SignalR
+        try {
+          console.log(`Notifying SignalR for users: ${incomingClean.join(', ')}`);
+          if (signalRUrl && Array.isArray(incomingClean) && incomingClean.length) {
+            await fetch(signalRUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                hub: 'ticketshubchannels',
+                userIds: incomingClean, // lista de correos / userId a notificar
+                target: 'agentAssignment',
+                payload: existing,
+              }),
+            });
+          }
+        } catch (e) {
+          context.log('⚠️ SignalR notify failed:', e.message);
+        }
 
-        // 8) DTO final
+        // --- DTO final
         const dto = validateAndFormatTicket(existing, badRequest, context);
         return success('Operation successful', dto);
       } catch (e) {
@@ -152,11 +141,8 @@ app.http('cosmoUpdateCollaborators', {
       }
     },
     {
-      // 🔐 Acceso a nivel de endpoint → pueden entrar SWITCHBOARD y REFERRALS
       scopesAny: ['access_as_user'],
-      groupsAny: [
-        GROUPS.SWITCHBOARD.ACCESS_GROUP,
-      ],
+      groupsAny: [GROUP_SWITCHBOARD_ACCESS],
     }
   ),
 });
