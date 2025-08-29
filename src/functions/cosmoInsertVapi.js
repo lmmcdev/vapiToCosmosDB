@@ -182,11 +182,9 @@ app.http('cosmoInsertVapi', {
       id: ticketId,
       summary,
       call_reason: body.call_reason,
-
       // ⬇️ SOLO hora de Miami
       createdAt,         // ISO con offset -04:00 / -05:00
       creation_date,     // "MM/DD/YYYY, HH:mm"
-
       patient_name: body.patient_name,
       patient_dob: body.patient_date_of_birth,
       caller_name: body.caller_name,
@@ -195,7 +193,7 @@ app.http('cosmoInsertVapi', {
       patient_id,
       linked_patient_snapshot,
       url_audio: body.url_audio,
-      caller_id: body.caller_id || null,
+      caller_id: body.caller_id || body.assigned_department,
       call_cost: cost,
       assigned_department: body.assigned_department || 'referrals', //el departamento asignado, en este endpoint es switchboard, Erika agregarlo en el JSON de la llamada de VAPI
       call_duration,
