@@ -67,15 +67,15 @@ setInterval(async () => {
 
   // Notificar SignalR (best effort)
   for (const doc of batch) {
-    const assigned_department = doc.assigned_department;
-    console.log(`Notifying SignalR for department: ${assigned_department}`);
+    const location = doc.caller_id;
+    console.log(`Notifying SignalR for location: ${location}`);
     try {
       fetch(signalRUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           hub: 'ticketshubchannels',
-          groupName: `department:${assigned_department}`,
+          groupName: `location:${location}`,
           target: 'ticketCreated',
           payload: doc
         })
