@@ -9,7 +9,14 @@ const { getMiamiNow } = require('./helpers/timeHelper');
 // 🔐 Auth
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
-const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
+const { getEmailFromClaims } = require('./auth/auth.helper');
+
+// 🔹 Todos los ACCESS_GROUPs (multi-depto)
+const ALL_ACCESS_GROUPS = Object.values(GROUPS)
+  .map((dept) => dept.ACCESS_GROUP)
+  .filter(Boolean);
+
+const lc = (s) => (s || '').toLowerCase();
 
 app.http('cosmoUpdateStatus', {
   route: 'cosmoUpdateStatus',
@@ -19,24 +26,14 @@ app.http('cosmoUpdateStatus', {
     try {
       const { dateISO: miamiUTC } = getMiamiNow();
 
-      // 1) Actor
+      // 1) Usuario logueado
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
       if (!actor_email) {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
 
-      // 2) Rol efectivo (supervisor/agent)
-      // Nota: aquí seguimos resolviendo roles con cualquier grupo supervisor/agent
-      const { role } = getRoleGroups(claims, {
-        SUPERVISORS_GROUP: Object.values(GROUPS.SWITCHBOARD || {})?.[1], // si tienes helpers mejores, úsalos
-        AGENTS_GROUP: Object.values(GROUPS.SWITCHBOARD || {})?.[2],
-      });
-      if (!role) {
-        return { status: 403, jsonBody: { error: 'User has no role group' } };
-      }
-
-      // 3) Body + DTO
+      // 2) Parse + valida body
       let body;
       try {
         body = await request.json();
@@ -47,7 +44,6 @@ app.http('cosmoUpdateStatus', {
       const { error: vErr, value } = updateTicketStatusInput.validate(body, {
         abortEarly: false,
         stripUnknown: true,
-        context: { role },
       });
       if (vErr) {
         const details = vErr.details?.map(d => d.message).join('; ') || 'Invalid input';
@@ -56,7 +52,7 @@ app.http('cosmoUpdateStatus', {
 
       const { ticketId, newStatus } = value;
 
-      // 4) Leer ticket
+      // 3) Leer ticket
       const item = getContainer().item(ticketId, ticketId);
       let existing;
       try {
@@ -66,24 +62,22 @@ app.http('cosmoUpdateStatus', {
       }
       if (!existing) return notFound('Ticket not found.');
 
-      // 5) Autorización: asignado, colaborador o supervisor
-      const lc = (s) => (s || '').toLowerCase();
+      // 4) Autorización contextual
       const isAssigned = lc(existing.agent_assigned) === lc(actor_email);
       const isCollaborator =
         Array.isArray(existing.collaborators) &&
         existing.collaborators.map(lc).includes(lc(actor_email));
-      const isSupervisor = role === 'supervisor';
 
-      if (!isAssigned && !isCollaborator && !isSupervisor) {
+      if (!isAssigned && !isCollaborator) {
         return badRequest(`You do not have permission to change this ticket's status.`);
       }
 
-      // 6) Evitar estado duplicado
+      // 5) Evitar duplicados
       if ((existing.status || '') === newStatus) {
         return badRequest('New status is the same as current.');
       }
 
-      // 7) PatchOps
+      // 6) PatchOps
       const patchOps = [];
 
       if (!Array.isArray(existing.notes)) {
@@ -92,7 +86,7 @@ app.http('cosmoUpdateStatus', {
 
       patchOps.push({ op: 'replace', path: '/status', value: newStatus });
 
-      // Manejo de cierre / reapertura
+      // cierre/reapertura
       if (newStatus === 'Done') {
         patchOps.push({
           op: existing.closedAt ? 'replace' : 'add',
@@ -114,7 +108,7 @@ app.http('cosmoUpdateStatus', {
         },
       });
 
-      // 8) Aplicar patch y releer
+      // 7) Guardar cambios
       try {
         await item.patch(patchOps);
         ({ resource: existing } = await item.read());
@@ -122,7 +116,7 @@ app.http('cosmoUpdateStatus', {
         return error('Error updating status.', 500, e.message);
       }
 
-      // 9) Formatear DTO
+      // 8) DTO salida
       let formattedDto;
       try {
         formattedDto = validateAndFormatTicket(existing, badRequest, context);
@@ -138,6 +132,6 @@ app.http('cosmoUpdateStatus', {
   }, {
     // 🔐 Todos los usuarios de todos los grupos
     scopesAny: ['access_as_user'],
-    groupsAny: Object.values(GROUPS).flatMap(Object.values),
+    groupsAny: ALL_ACCESS_GROUPS,
   })
 });
