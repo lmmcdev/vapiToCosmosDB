@@ -8,12 +8,13 @@ const { success, badRequest, error } = require('../shared/responseUtils');
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 const { getMiamiNow } = require('./helpers/timeHelper');
 
-// 🔐 Auth utils
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims } = require('./auth/auth.helper');
+const { resolveUserDepartment } = require('./helpers/resolveDepartment');
+const { canModifyTicket } = require('./helpers/canModifyTicketHelper');
 
-// 📌 Todos los grupos definidos en groups.config
+// 📌 Todos los grupos
 const ALL_GROUPS = Object.values(GROUPS)
   .flatMap(mod => Object.values(mod))
   .filter(Boolean);
@@ -28,12 +29,15 @@ app.http('updateTicketsByPhone', {
     try {
       const { dateISO: miamiUTC } = getMiamiNow();
 
-      // 1) Actor desde el token
+      // 1) Actor
       const claims = context.user;
       const actor_email = getEmailFromClaims(claims);
       if (!actor_email) {
         return { status: 401, jsonBody: { error: 'Email not found in token' } };
       }
+
+      const { role } = resolveUserDepartment(claims) || {};
+      const isSupervisor = role === 'SUPERVISORS_GROUP';
 
       // 2) Parse entrada
       let body;
@@ -43,23 +47,17 @@ app.http('updateTicketsByPhone', {
         return badRequest('Invalid JSON payload.');
       }
 
-      const {
-        action = 'relatePast',
-        ticket_id,
-        phone,
-        patient_id,
-      } = body;
-
+      const { action = 'relatePast', ticket_id, phone, patient_id } = body;
       const container = getContainer();
 
       // 3) Validaciones de negocio
       const allowed = ['relateCurrent', 'relatePast', 'relateFuture', 'unlink'];
       if (!allowed.includes(action)) return badRequest('Invalid Action.');
-      if (!patient_id && action !== 'unlink') return badRequest('Missing required field: patient_id');
-      if (['relateCurrent', 'unlink'].includes(action) && !ticket_id) return badRequest('Missing required field: ticket_id');
-      if (action === 'relatePast' && !phone) return badRequest('Missing required field: phone');
+      if (!patient_id && action !== 'unlink') return badRequest('Missing patient_id');
+      if (['relateCurrent', 'unlink'].includes(action) && !ticket_id) return badRequest('Missing ticket_id');
+      if (action === 'relatePast' && !phone) return badRequest('Missing phone');
 
-      // 4) Obtener snapshot paciente (best-effort)
+      // 4) Snapshot paciente
       let linked_patient_snapshot = {};
       if (patient_id && patientsContainer) {
         try {
@@ -78,9 +76,6 @@ app.http('updateTicketsByPhone', {
         }
       }
 
-      // Helper lowercase
-      const lc = (s) => (s || '').toLowerCase();
-
       // ====== ACTION: relateCurrent ======
       if (action === 'relateCurrent') {
         const item = container.item(ticket_id, ticket_id);
@@ -89,11 +84,7 @@ app.http('updateTicketsByPhone', {
         });
         if (!ticket) return badRequest('Ticket not found.');
 
-        const isAssigned = lc(ticket.agent_assigned) === lc(actor_email);
-        const isCollaborator = Array.isArray(ticket.collaborators) &&
-          ticket.collaborators.map(lc).includes(lc(actor_email));
-
-        if (!isAssigned && !isCollaborator) {
+        if (!canModifyTicket(ticket, actor_email, isSupervisor)) {
           return { status: 403, jsonBody: { error: 'Insufficient permission for relateCurrent.' } };
         }
 
@@ -153,6 +144,11 @@ app.http('updateTicketsByPhone', {
             .fetchNext();
 
           for (const ticket of resources) {
+            if (!canModifyTicket(ticket, actor_email, isSupervisor)) {
+              context.log(`🚫 Skipping ticket ${ticket.id}, user not authorized`);
+              continue;
+            }
+
             const item = container.item(ticket.id, ticket.id);
             const patchOps = [];
 
@@ -197,6 +193,10 @@ app.http('updateTicketsByPhone', {
 
       // ====== ACTION: relateFuture ======
       if (action === 'relateFuture') {
+        if (!isSupervisor) {
+          return { status: 403, jsonBody: { error: 'Only supervisors can create future link rules.' } };
+        }
+
         const ruleContainer = container.database.container('phone_link_rules');
         const ruleId = `rule_${phone}`;
         await ruleContainer.items.upsert({
@@ -220,11 +220,7 @@ app.http('updateTicketsByPhone', {
         });
         if (!ticket) return badRequest('Ticket not found.');
 
-        const isAssigned = lc(ticket.agent_assigned) === lc(actor_email);
-        const isCollaborator = Array.isArray(ticket.collaborators) &&
-          ticket.collaborators.map(lc).includes(lc(actor_email));
-
-        if (!isAssigned && !isCollaborator) {
+        if (!canModifyTicket(ticket, actor_email, isSupervisor)) {
           return { status: 403, jsonBody: { error: 'Insufficient permission for unlink.' } };
         }
 
@@ -278,6 +274,6 @@ app.http('updateTicketsByPhone', {
     }
   }, {
     scopesAny: ['access_as_user'],
-    groupsAny: ALL_GROUPS, // ✅ Todos los grupos de groups.config
+    groupsAny: ALL_GROUPS,
   })
 });

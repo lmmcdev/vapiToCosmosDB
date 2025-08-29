@@ -14,6 +14,10 @@ const { getMiamiNow } = require('./helpers/timeHelper');
 // DTO formatter tolerante
 const { validateAndFormatTicket } = require('./helpers/outputDtoHelper');
 
+const { canModifyTicket } = require('./helpers/canModifyTicketHelper');  // 👈 nuevo helper
+const { resolveUserDepartment } = require('./helpers/resolveDepartment');
+
+
 // ✅ Schemas
 const { updateAiClassificationInput } = require('./dtos/input.schema');
 
@@ -89,6 +93,12 @@ app.http('cosmoUpdateAiClassification', {
 
       const { resource: existing } = await item.read();
       if (!existing) return notFound('Ticket not found.');
+
+      const { role } = resolveUserDepartment(claims) || {};
+      const isSupervisor = role === 'SUPERVISORS_GROUP';
+      if (!canModifyTicket(existing, actor_email, isSupervisor)) {
+        return { status: 403, jsonBody: { error: 'Insufficient permissions to update this ticket' } };
+      }
 
       const prevAI = existing.aiClassification || {};
       const nextAI = { ...prevAI, ...patchIn };

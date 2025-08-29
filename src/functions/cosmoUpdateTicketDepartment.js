@@ -12,6 +12,9 @@ const { getMiamiNow } = require('./helpers/timeHelper');
 const { withAuth } = require('./auth/withAuth');
 const { GROUPS } = require('./auth/groups.config');
 const { getEmailFromClaims } = require('./auth/auth.helper');
+const { canModifyTicket } = require('./helpers/canModifyTicketHelper');  // 👈 nuevo helper
+const { resolveUserDepartment } = require('./helpers/resolveDepartment');
+
 
 // Helper: sacar todos los grupos supervisores de groups.config
 const ALL_SUPERVISOR_GROUPS = Object.values(GROUPS)
@@ -61,6 +64,13 @@ app.http('cosmoUpdateTicketDepartment', {
         return error('Error reading ticket.', 500, e.message);
       }
       if (!existing) return notFound('Ticket not found.');
+
+      //3.1 can modify?
+      const { role } = resolveUserDepartment(claims) || {};
+      const isSupervisorV = role === 'SUPERVISORS_GROUP';
+      if (!canModifyTicket(existing, actor_email, isSupervisorV)) {
+        return { status: 403, jsonBody: { error: 'Insufficient permissions to update this ticket' } };
+      }
 
       // 4) Autorización: SOLO supervisores
       // (los grupos ya se validaron en withAuth, pero reforzamos aquí)
