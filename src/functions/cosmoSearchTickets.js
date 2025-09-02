@@ -64,6 +64,7 @@ function validateFilterString(filter) {
   const allowedFields = [
     'status',
     'assigned_department',
+    'caller_id',
     'createdAt',
     'agent_assigned',
     'linked_patient_snapshot/Name',
