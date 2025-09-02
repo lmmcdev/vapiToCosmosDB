@@ -123,6 +123,10 @@ function mapTicketToDto(ticket = {}) {
         ? ticket.aiClassification
         : null
     ),
+
+    qc: (ticket.qc && typeof ticket.qc === 'object'
+      ? ticket.qc
+      : null)
   };
 }
 
