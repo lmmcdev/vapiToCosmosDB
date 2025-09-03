@@ -21,6 +21,14 @@ const GROUPS = {
     AGENTS_GROUP:      'efef4665-2646-407f-82aa-1d82505f3db5',
   },
 
+  BIRDROAD: {
+    AGENTS_GROUP:      'ba0eaf36-b9b1-4f70-8fa2-027b5d0ac346',
+  },
+
+  CUTLERRIDGE: {
+    AGENTS_GROUP:      '83359654-b4d5-4e20-ae16-ecc3bb3572b4',
+  },
+
   QUALITY: {
     QUALITY_GROUP: '1d48ef41-8e80-46ed-8ff3-3b084dedfb7f'
   }
