@@ -69,6 +69,7 @@ app.http('updateTicketsByPhone', {
               DOB: patient.DOB || '',
               Address: patient.Address || '',
               Location: patient.Location_Name || '',
+              Attending_Physician: patient.Attending_Physician || '',
             };
           }
         } catch (err) {
