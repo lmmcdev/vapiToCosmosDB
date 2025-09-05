@@ -48,3 +48,7 @@ __queuestorage__
 __azurite_db*__.json
 /.vscode
 /.vscode
+/shared/*.test.js
+src/functions/cosmoGet.test.js
+src/functions/cosmoGetByIds.test.js
+src/functions/*.test.js

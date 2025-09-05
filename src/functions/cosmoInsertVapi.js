@@ -7,12 +7,9 @@ const { getPhoneRulesContainer } = require('../shared/cosmoPhoneRulesClient');
 const { getPatientsContainer } = require('../shared/cosmoPatientsClient');
 const { success, badRequest } = require('../shared/responseUtils');
 const { getMiamiNow } = require('./helpers/timeHelper');
+const { classifyTicket } = require('./helpers/openaiHelper');
 
 const signalRUrl = process.env.SIGNALR_SEND_TO_GROUPS;
-
-const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-const openaiApiKey = process.env.AZURE_OPENAI_KEY;
-const deployment = 'gpt-35-turbo';
 
 const batchQueue = [];
 const BATCH_SIZE = 10;
@@ -102,35 +99,7 @@ app.http('cosmoInsertVapi', {
     const summary = body.summary;
 
     // --- Clasificación IA (best effort) ---
-    let aiClassification = { priority: 'normal', risk: 'none', category: 'General' };
-    try {
-      const classifyRes = await fetch(
-        `${openaiEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=2025-01-01-preview`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'api-key': openaiApiKey },
-          body: JSON.stringify({
-            messages: [
-              {
-                role: 'system',
-                content:
-                  'Responde SOLO en JSON con priority (low, medium, high), risk (none, legal, disenrollment), y category (transport, appointment, new patient, disenrollment, customer service, new address, hospitalization, others).'
-              },
-              { role: 'user', content: `Resumen: "${summary}"` }
-            ],
-            temperature: 0
-          })
-        }
-      );
-
-      if (classifyRes.ok) {
-        const result = await classifyRes.json();
-        const raw = result.choices?.[0]?.message?.content?.trim();
-        if (raw) aiClassification = JSON.parse(raw);
-      }
-    } catch (err) {
-      context.log(`OpenAI classify error: ${err.message}`);
-    }
+    const aiClassification = await classifyTicket(summary);
 
     // --- FECHAS: ambas en hora de MIAMI ---
           // Miami timestamps
@@ -195,7 +164,7 @@ app.http('cosmoInsertVapi', {
       url_audio: body.url_audio,
       caller_id: body.caller_id || body.assigned_department,
       call_cost: cost,
-      assigned_department: body.assigned_department || 'referrals', //el departamento asignado, en este endpoint es switchboard, Erika agregarlo en el JSON de la llamada de VAPI
+      assigned_department: body.assigned_department || 'switchboard', //el departamento asignado, en este endpoint es switchboard, Erika agregarlo en el JSON de la llamada de VAPI
       call_duration,
       status: 'New',
       quality_control: false,
