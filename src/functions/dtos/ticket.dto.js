@@ -56,6 +56,8 @@ const ticketSchema = Joi.object({
     Joi.object().unknown(true),
     Joi.valid(null)
   ).optional(),
+
+  transcript: Joi.string().optional().allow('', null),
 })
 // ✅ aceptamos claves extra en el ticket original, pero recuerda que validamos el DTO mapeado
 .unknown(true);
@@ -126,7 +128,9 @@ function mapTicketToDto(ticket = {}) {
 
     qc: (ticket.qc && typeof ticket.qc === 'object'
       ? ticket.qc
-      : null)
+      : null),
+
+    transcript: ticket.transcript ?? null
   };
 }
 

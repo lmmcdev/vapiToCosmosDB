@@ -65,6 +65,7 @@ app.http('cosmoGetByIds', {
 
       // 5) Formatear cada ticket con el DTO (tolerante)
       const formatted = [];
+      console.log('Items fetched from DB:', items.length);
       for (const t of items) {
         try {
           const dto = validateAndFormatTicket(t, badRequest, context, { strict: false });
