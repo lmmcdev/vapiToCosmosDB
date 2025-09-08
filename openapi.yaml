@@ -1,0 +1,809 @@
+openapi: 3.0.3
+info:
+  title: VAPI to Cosmos DB API
+  description: Backend API for ticket management and call handling system
+  version: 1.0.0
+  contact:
+    name: API Support
+    # TODO: Add proper contact information
+  license:
+    name: MIT
+    # TODO: Confirm license
+
+servers:
+  - url: https://api.example.com/api
+    description: Production server
+    # TODO: Update with actual production URL
+  - url: https://staging-api.example.com/api
+    description: Staging server
+    # TODO: Update with actual staging URL
+
+security:
+  - bearerAuth: ['access_as_user']
+
+paths:
+  # Ticket Management Endpoints
+  /cosmoInsertVapi:
+    post:
+      summary: Create new ticket from VAPI call
+      description: Creates a new support ticket with call information and audio transcription
+      tags: [Tickets]
+      security:
+        - {} # Anonymous access allowed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketRequest'
+      responses:
+        '200':
+          description: Ticket created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          description: Request payload too large (>50KB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service temporarily unavailable - high load
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cosmoGet:
+    get:
+      summary: Get user's tickets
+      description: Retrieves tickets assigned to the authenticated user or department
+      tags: [Tickets]
+      security:
+        - bearerAuth: ['access_as_user']
+      parameters:
+        - name: date
+          in: query
+          description: Filter tickets by specific date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2024-01-15"
+      responses:
+        '200':
+          description: Tickets retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticket'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /searchTickets:
+    post:
+      summary: Search tickets
+      description: Search tickets using cognitive search with filters
+      tags: [Tickets]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchTicketsRequest'
+      responses:
+        '200':
+          description: Search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /cosmoUpdateStatus:
+    patch:
+      summary: Update ticket status
+      description: Updates the status of a specific ticket
+      tags: [Tickets]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStatusRequest'
+      responses:
+        '200':
+          description: Status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /cosmoUpdateNotes:
+    patch:
+      summary: Update ticket notes
+      description: Adds notes or events to a specific ticket
+      tags: [Tickets]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNotesRequest'
+      responses:
+        '200':
+          description: Notes updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # Call Analysis Endpoints
+  /analyze-call:
+    post:
+      summary: Analyze call transcription
+      description: Analyzes call transcription using AI to extract insights and metrics
+      tags: [Call Analysis]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeCallRequest'
+      responses:
+        '200':
+          description: Call analysis completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallAnalysisResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /call-metrics:
+    post:
+      summary: Extract basic call metrics
+      description: Extracts basic metrics from call transcription without AI analysis
+      tags: [Call Analysis]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transcription:
+                  type: string
+                  description: Call transcription text
+                  minLength: 1
+              required: [transcription]
+      responses:
+        '200':
+          description: Call metrics extracted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallMetricsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # Patient Search
+  /searchPatients:
+    post:
+      summary: Search patients
+      description: Search patients using cognitive search
+      tags: [Patients]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchPatientsRequest'
+      responses:
+        '200':
+          description: Patient search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchPatientsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # Statistics
+  /getTicketStats:
+    get:
+      summary: Get ticket statistics
+      description: Retrieves daily or monthly ticket statistics (supervisors only)
+      tags: [Statistics]
+      security:
+        - bearerAuth: ['access_as_user']
+      parameters:
+        - name: date
+          in: query
+          description: Get daily stats for specific date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2024-01-15"
+        - name: month
+          in: query
+          description: Get monthly stats (YYYY-MM)
+          schema:
+            type: string
+            pattern: '^\\d{4}-\\d{2}$'
+            example: "2024-01"
+        - name: scope
+          in: query
+          description: Scope for monthly stats (final or mtd)
+          schema:
+            type: string
+            enum: [final, mtd]
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Forbidden - Supervisors only
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Entra ID (Azure AD) JWT Bearer token.
+        Required scopes: access_as_user
+        # TODO: Add specific Entra ID configuration details
+
+  schemas:
+    # Core Ticket Schema
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique ticket identifier
+        summary:
+          type: string
+          maxLength: 2000
+          description: Call summary or description
+        call_reason:
+          type: string
+          maxLength: 500
+          description: Reason for the call
+        creation_date:
+          type: string
+          format: date-time
+          description: Ticket creation timestamp
+        patient_name:
+          type: string
+          maxLength: 100
+          description: Patient name
+        patient_dob:
+          type: string
+          pattern: '^\\d{2}/\\d{2}/\\d{4}$'
+          description: Patient date of birth (MM/DD/YYYY)
+        caller_name:
+          type: string
+          maxLength: 100
+          description: Name of the caller
+        callback_number:
+          type: string
+          pattern: '^[\\+]?[\\d\\s\\-\\(\\)]{7,20}$'
+          description: Callback phone number
+        phone:
+          type: string
+          pattern: '^[\\+]?[\\d\\s\\-\\(\\)]{7,20}$'
+          description: Primary phone number
+        caller_id:
+          type: string
+          maxLength: 50
+          description: Caller ID or location identifier
+        assigned_department:
+          type: string
+          enum: [switchboard, medical, billing, enrollment, pharmacy, transportation, quality, admin]
+          description: Assigned department
+        call_cost:
+          type: number
+          minimum: 0
+          maximum: 1000
+          description: Cost of the call
+        call_duration:
+          type: number
+          minimum: 0
+          maximum: 86400
+          description: Call duration in seconds
+        status:
+          type: string
+          enum: [New, In Progress, Done, Pending]
+          description: Current ticket status
+        agent_assigned:
+          type: string
+          format: email
+          description: Email of assigned agent
+        tiket_source:
+          type: string
+          enum: [Phone, Email, Web, Chat]
+          description: Source of the ticket
+        url_audio:
+          type: string
+          format: uri
+          maxLength: 500
+          description: URL to audio recording
+        quality_control:
+          type: boolean
+          description: Quality control flag
+        collaborators:
+          type: array
+          items:
+            type: string
+            format: email
+          description: List of collaborator emails
+        notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketNote'
+        patient_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Linked patient ID
+        linked_patient_snapshot:
+          type: object
+          nullable: true
+          description: Snapshot of linked patient data
+        aiClassification:
+          type: object
+          nullable: true
+          properties:
+            priority:
+              type: string
+              enum: [low, normal, high, urgent]
+            risk:
+              type: string
+              enum: [none, low, medium, high]
+            category:
+              type: string
+              description: AI-determined category
+        transcript:
+          type: string
+          nullable: true
+          description: Call transcript
+        work_time:
+          type: array
+          items:
+            type: object
+          description: Work time tracking entries
+
+    TicketNote:
+      type: object
+      properties:
+        datetime:
+          type: string
+          format: date-time
+        event_type:
+          type: string
+          enum: [user_note, system_log, agent_action]
+        agent_email:
+          type: string
+          format: email
+        event:
+          type: string
+          description: Note content or event description
+      required: [datetime, event_type]
+
+    # Request Schemas
+    CreateTicketRequest:
+      type: object
+      properties:
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        call_reason:
+          type: string
+          maxLength: 500
+        patient_name:
+          type: string
+          maxLength: 100
+        patient_date_of_birth:
+          type: string
+          pattern: '^\\d{2}/\\d{2}/\\d{4}$'
+        caller_name:
+          type: string
+          maxLength: 100
+        callback_number:
+          type: string
+          pattern: '^[\\+]?[\\d\\s\\-\\(\\)]{7,20}$'
+        phone_number:
+          type: string
+          pattern: '^[\\+]?[\\d\\s\\-\\(\\)]{7,20}$'
+        url_audio:
+          type: string
+          format: uri
+          maxLength: 500
+        caller_id:
+          type: string
+          maxLength: 50
+        assigned_department:
+          type: string
+          maxLength: 50
+        call_cost:
+          type: number
+          minimum: 0
+          maximum: 1000
+          default: 0
+        call_duration:
+          type: number
+          minimum: 0
+          maximum: 86400
+          default: 0
+        ticket_source:
+          type: string
+          enum: [Phone, Email, Web, Chat]
+          default: Phone
+      required: [summary, phone_number]
+      additionalProperties: false
+
+    UpdateStatusRequest:
+      type: object
+      properties:
+        ticketId:
+          type: string
+          format: uuid
+        newStatus:
+          type: string
+          enum: [New, In Progress, Done, Pending]
+      required: [ticketId, newStatus]
+
+    UpdateNotesRequest:
+      type: object
+      properties:
+        ticketId:
+          type: string
+          format: uuid
+        notes:
+          type: array
+          items:
+            type: object
+            properties:
+              event:
+                type: string
+                description: Note content
+              event_type:
+                type: string
+                enum: [user_note, agent_action]
+                default: user_note
+        event:
+          type: string
+          description: System event to log
+      required: [ticketId]
+
+    SearchTicketsRequest:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Search query string
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        filters:
+          type: object
+          properties:
+            status:
+              type: string
+            assigned_department:
+              type: string
+            agent_assigned:
+              type: string
+              format: email
+            createdAt:
+              type: object
+              properties:
+                from:
+                  type: string
+                  format: date-time
+                to:
+                  type: string
+                  format: date-time
+            linked_patient_name_contains:
+              type: string
+        filter:
+          type: string
+          description: OData-style filter string
+      additionalProperties: false
+
+    AnalyzeCallRequest:
+      type: object
+      properties:
+        transcription:
+          type: string
+          minLength: 1
+          description: Call transcription text to analyze
+        options:
+          type: object
+          properties:
+            temperature:
+              type: number
+              minimum: 0
+              maximum: 2
+              description: AI analysis creativity level
+            maxTokens:
+              type: number
+              minimum: 1
+              description: Maximum tokens for AI response
+      required: [transcription]
+
+    SearchPatientsRequest:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Patient search query
+        filter:
+          type: string
+          description: Search filter string
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      required: [query]
+
+    # Response Schemas
+    TicketResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Ticket'
+
+    SearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                '@odata.count':
+                  type: integer
+                  description: Total number of search results
+                value:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Ticket'
+
+    CallAnalysisResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                analysis:
+                  type: object
+                  description: AI analysis results
+                basicMetrics:
+                  type: object
+                  properties:
+                    total_turns:
+                      type: integer
+                    estimated_duration_minutes:
+                      type: number
+                metadata:
+                  type: object
+                  properties:
+                    userEmail:
+                      type: string
+                      format: email
+                    userLocation:
+                      type: string
+                    userRole:
+                      type: string
+                    transcriptionLength:
+                      type: integer
+                    estimatedCallDuration:
+                      type: number
+
+    CallMetricsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                metrics:
+                  type: object
+                  properties:
+                    total_turns:
+                      type: integer
+                    estimated_duration_minutes:
+                      type: number
+
+    SearchPatientsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                totalResults:
+                  type: integer
+                patients:
+                  type: array
+                  items:
+                    type: object
+                    # TODO: Define patient schema structure
+
+    StatsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              # TODO: Define detailed statistics schema
+
+    # Base Response Schemas
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          description: Success message
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          description: Error message
+        details:
+          type: string
+          description: Additional error details
+        error_code:
+          type: string
+          description: Specific error code
+
+  responses:
+    BadRequest:
+      description: Bad request - Invalid input parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: "Validation error"
+            details: "Invalid JSON format"
+
+    Unauthorized:
+      description: Unauthorized - Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: "Email not found in token"
+
+    Forbidden:
+      description: Forbidden - Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: "User has no valid location/role"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: "Ticket not found"
+
+tags:
+  - name: Tickets
+    description: Ticket management operations
+  - name: Call Analysis
+    description: Call transcription analysis and metrics
+  - name: Patients
+    description: Patient search and management
+  - name: Statistics
+    description: System statistics and reporting
+
+# TODO Items for further development:
+# 1. Add proper server URLs for production and staging environments
+# 2. Define complete patient schema structure in SearchPatientsResponse
+# 3. Add detailed statistics schema for StatsResponse
+# 4. Include specific Entra ID configuration and scopes documentation
+# 5. Add rate limiting specifications
+# 6. Include webhook specifications for SignalR notifications
+# 7. Add comprehensive error code documentation
+# 8. Define data retention and privacy policies in description
+# 9. Add request/response examples for complex operations
+# 10. Include API versioning strategy
