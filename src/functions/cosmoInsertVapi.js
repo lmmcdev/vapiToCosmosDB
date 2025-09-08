@@ -155,7 +155,7 @@ setInterval(async () => {
   }
 }, BATCH_INTERVAL_MS);
 
-app.http('cosmoInsertVapiv2', {
+app.http('cosmoInsertVapi', {
   methods: ['POST'],
   authLevel: 'anonymous', // 🚨 Consider implementing proper authentication
   handler: async (request, context) => {
