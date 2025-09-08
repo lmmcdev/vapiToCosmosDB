@@ -169,7 +169,7 @@ app.http('cosmoInsertVapi', {
       status: 'New',
       quality_control: false,
       agent_assigned: '',
-      tiket_source: 'Phone',
+      tiket_source: body.ticket_source || 'Phone',
       collaborators: [],
       aiClassification,
       notes: [
