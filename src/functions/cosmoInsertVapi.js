@@ -111,13 +111,34 @@ setInterval(async () => {
     const location = sanitizeText(doc.caller_id, 50);
     console.log(`Notifying SignalR for location: ${location}`);
     try {
-      // 🔒 SECURITY: Only send safe payload fields
+      // 🔒 SECURITY: Send all sanitized ticket fields
       const safePayload = {
+        tickets: doc.tickets,
         id: doc.id,
-        summary: sanitizeText(doc.summary, 200), // Truncate for notifications
-        status: doc.status,
+        summary: sanitizeText(doc.summary, 2000),
+        call_reason: doc.call_reason,
+        createdAt: doc.createdAt,
+        creation_date: doc.creation_date,
+        patient_name: doc.patient_name,
+        patient_dob: doc.patient_dob,
+        caller_name: doc.caller_name,
+        callback_number: doc.callback_number,
+        phone: doc.phone,
+        patient_id: doc.patient_id,
+        linked_patient_snapshot: doc.linked_patient_snapshot,
+        url_audio: doc.url_audio,
+        caller_id: doc.caller_id,
+        call_cost: doc.call_cost,
         assigned_department: doc.assigned_department,
-        creation_date: doc.creation_date
+        call_duration: doc.call_duration,
+        status: doc.status,
+        quality_control: doc.quality_control,
+        agent_assigned: doc.agent_assigned,
+        tiket_source: doc.tiket_source,
+        collaborators: doc.collaborators,
+        aiClassification: doc.aiClassification,
+        notes: doc.notes,
+        timestamp: doc.timestamp
       };
       
       fetch(signalRUrl, {
@@ -134,7 +155,7 @@ setInterval(async () => {
   }
 }, BATCH_INTERVAL_MS);
 
-app.http('cosmoInsertVapi', {
+app.http('cosmoInsertVapiv2', {
   methods: ['POST'],
   authLevel: 'anonymous', // 🚨 Consider implementing proper authentication
   handler: async (request, context) => {
