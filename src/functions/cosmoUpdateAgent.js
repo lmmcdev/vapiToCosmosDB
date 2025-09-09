@@ -13,6 +13,9 @@ const { getEmailFromClaims, getRoleGroups } = require('./auth/auth.helper');
 // DTO de entrada
 const { assignAgentInput } = require('./dtos/input.schema');
 
+// Teams notification helper
+const { sendTeamsNotification } = require('./helpers/teamsNotificationHelper');
+
 // 🔹 Construye lista de TODOS los grupos supervisores de todos los módulos
 const ALL_SUPERVISORS = Object.values(GROUPS)
   .map(g => g?.SUPERVISORS_GROUP)
@@ -100,7 +103,32 @@ app.http('assignAgent', {
           return error('Error assigning agent.', 500, e.message);
         }
 
-        // 7) DTO
+        // 7) Send Teams notification to the assigned agent
+        try {
+          const notificationPayload = {
+            user: target_agent_email,
+            notification: `You have been assigned a new ticket: ${existing.summary || 'No summary available'}`,
+            ticketId: ticketId,
+            priority: 'normal',
+            title: 'New Ticket Assignment',
+            metadata: {
+              source: 'agent-assignment',
+              assignedBy: actor_email,
+              ticketSummary: existing.summary?.substring(0, 100) || 'No summary',
+              patientName: existing.patient_name || 'Unknown'
+            }
+          };
+
+          context.log(`📧 Sending Teams notification to assigned agent: ${target_agent_email} for ticket: ${ticketId}`);
+          await sendTeamsNotification(notificationPayload, context);
+          context.log(`✅ Teams notification sent successfully to ${target_agent_email}`);
+        } catch (notificationError) {
+          // Log the error but don't fail the assignment operation
+          context.log(`⚠️ Failed to send Teams notification to ${target_agent_email}:`, notificationError.message);
+          // We continue execution since the assignment was successful
+        }
+
+        // 8) DTO
         const dto = validateAndFormatTicket(existing, badRequest, context);
         return success('Agent assigned successfully.', dto);
       } catch (e) {
