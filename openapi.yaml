@@ -300,6 +300,81 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # Teams Notification Endpoints
+  /teams/notification:
+    post:
+      summary: Send Teams notification
+      description: Sends a notification to Microsoft Teams via Azure Logic App
+      tags: [Teams Notifications]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamsNotificationRequest'
+      responses:
+        '200':
+          description: Teams notification sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamsNotificationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          description: Logic App configuration error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Teams notification service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Teams notification service timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /teams/notification/config:
+    get:
+      summary: Get Teams notification configuration status
+      description: Validates the configuration of Teams notification service (supervisors only)
+      tags: [Teams Notifications]
+      security:
+        - bearerAuth: ['access_as_user']
+      responses:
+        '200':
+          description: Configuration status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamsNotificationConfigResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Forbidden - Supervisors only
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error checking configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -618,6 +693,45 @@ components:
           default: 20
       required: [query]
 
+    TeamsNotificationRequest:
+      type: object
+      properties:
+        user:
+          type: string
+          format: email
+          description: Email address of the user to notify
+        notification:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Notification message content
+        ticketId:
+          type: string
+          format: uuid
+          description: Optional ticket ID associated with this notification
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+          default: normal
+          description: Notification priority level
+        title:
+          type: string
+          maxLength: 200
+          description: Optional notification title
+        metadata:
+          type: object
+          properties:
+            source:
+              type: string
+              maxLength: 50
+            additionalInfo:
+              type: string
+              maxLength: 500
+          additionalProperties: true
+          description: Optional metadata for notification context
+      required: [user, notification]
+      additionalProperties: false
+
     # Response Schemas
     TicketResponse:
       allOf:
@@ -717,6 +831,97 @@ components:
               type: object
               # TODO: Define detailed statistics schema
 
+    TeamsNotificationResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                user:
+                  type: string
+                  format: email
+                  description: Email of the notified user
+                notification:
+                  type: string
+                  description: Notification message that was sent
+                ticketId:
+                  type: string
+                  format: uuid
+                  description: Associated ticket ID if provided
+                priority:
+                  type: string
+                  enum: [low, normal, high, urgent]
+                  description: Notification priority level
+                title:
+                  type: string
+                  description: Notification title if provided
+                timestamp:
+                  type: string
+                  format: date-time
+                  description: When the notification was sent
+                logicAppResponse:
+                  type: object
+                  properties:
+                    status:
+                      type: integer
+                      description: HTTP status code from Logic App
+                    statusText:
+                      type: string
+                      description: HTTP status text from Logic App
+                    executionTime:
+                      type: integer
+                      description: Execution time in milliseconds
+                  required: [status]
+              required: [user, notification, timestamp, logicAppResponse]
+
+    TeamsNotificationConfigResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                isConfigured:
+                  type: boolean
+                  description: Whether Teams notification service is properly configured
+                timestamp:
+                  type: string
+                  format: date-time
+                  description: When the configuration was checked
+                checkedBy:
+                  type: string
+                  format: email
+                  description: Email of the user who checked the configuration
+                configuration:
+                  type: object
+                  properties:
+                    baseUrl:
+                      type: string
+                      format: uri
+                      description: Logic App base URL
+                    endpoint:
+                      type: string
+                      description: Logic App endpoint path
+                    timeout:
+                      type: integer
+                      description: Request timeout in milliseconds
+                    retries:
+                      type: integer
+                      description: Maximum number of retries
+                    signature:
+                      type: string
+                      description: Signature configuration status (masked)
+                  required: [baseUrl, endpoint, timeout, retries, signature]
+                issues:
+                  type: array
+                  items:
+                    type: string
+                  description: Configuration issues if any
+              required: [isConfigured, timestamp, checkedBy, configuration]
+
     # Base Response Schemas
     SuccessResponse:
       type: object
@@ -795,6 +1000,8 @@ tags:
     description: Patient search and management
   - name: Statistics
     description: System statistics and reporting
+  - name: Teams Notifications
+    description: Microsoft Teams notification management
 
 # TODO Items for further development:
 # 1. Add proper server URLs for production and staging environments
