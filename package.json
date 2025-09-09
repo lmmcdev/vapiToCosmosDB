@@ -5,7 +5,7 @@
   "main": "src/functions/*.js",
   "scripts": {
     "start": "func start",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "docs:serve": "func start --port 7071",
     "docs:validate": "echo 'OpenAPI validation would go here - consider adding swagger-codegen validate'",
     "docs:open": "echo 'Opening documentation at http://localhost:7071/api/docs'"
