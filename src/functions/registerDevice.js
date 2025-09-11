@@ -63,7 +63,7 @@ app.http('registerDevice', {
     }
   }, {
     // ✅ Cualquier usuario autenticado con el scope de la API puede registrar su dispositivo
-    scopesAny: ['access_as_user'],
+    scopesAny: ['register_device'],
     // Sin restrictions de grupos -> todos los grupos pueden acceder
   }),
 });
