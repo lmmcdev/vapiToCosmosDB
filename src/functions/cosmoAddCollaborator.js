@@ -168,8 +168,8 @@ app.http('cosmoUpdateCollaborators', {
             try {
               await sendTeamsNotification({
                 user: collaboratorEmail,
-                notification: `Has sido agregado como colaborador en el ticket #${existing.id}`,
-                title: `Nuevo ticket asignado - ${existing.subject || existing.title || 'Sin título'}`,
+                notification: `You have been added as a collaborator on ticket #${existing.id}`,
+                title: `New ticket assigned - ${existing.subject || existing.title || 'No title'}`,
                 ticketId: existing.id,
                 priority: existing.priority || 'normal',
                 metadata: {
@@ -189,8 +189,8 @@ app.http('cosmoUpdateCollaborators', {
             try {
               await sendTeamsNotification({
                 user: collaboratorEmail,
-                notification: `Has sido removido como colaborador del ticket #${existing.id}`,
-                title: `Colaboración finalizada - ${existing.subject || existing.title || 'Sin título'}`,
+                notification: `You have been removed as a collaborator from ticket #${existing.id}`,
+                title: `Collaboration ended - ${existing.subject || existing.title || 'No title'}`,
                 ticketId: existing.id,
                 priority: 'low',
                 metadata: {
