@@ -55,6 +55,16 @@ function extractClockHour(isoLike) {
   return (h >= 0 && h <= 23) ? h : null;
 }
 
+// Inicializar statusCounts con conteo + IDs
+function initStatusCounts() {
+  const base = {};
+  for (const s of ALLOWED_STATUSES) {
+    base[s] = { count: 0, ticketIds: [] };
+  }
+  base.Total = { count: 0, ticketIds: [] };
+  return base;
+}
+
 app.timer('processTicketStats', {
   schedule: '0 50 * * * *',
   handler: async (_timer, context) => {
@@ -93,7 +103,7 @@ app.timer('processTicketStats', {
           categoryMap: {},
           globalTotalTime: 0,
           resolvedCount: 0,
-          statusCounts: ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {})
+          statusCounts: initStatusCounts()
         };
       }
 
@@ -107,7 +117,6 @@ app.timer('processTicketStats', {
       for (const t of tickets) {
         const loc = t?.location || 'UNKNOWN';
         if (!statsByLocation[loc]) {
-          // Si aparece una clínica no registrada, la creamos
           statsByLocation[loc] = {
             agentStatsMap: {},
             hourlyMap: {},
@@ -116,7 +125,7 @@ app.timer('processTicketStats', {
             categoryMap: {},
             globalTotalTime: 0,
             resolvedCount: 0,
-            statusCounts: ALLOWED_STATUSES.reduce((acc, s) => ((acc[s] = 0), acc), {})
+            statusCounts: initStatusCounts()
           };
         }
 
@@ -131,8 +140,13 @@ app.timer('processTicketStats', {
 
         // Status
         const normStatus = normalizeStatus(t?.status);
-        if (normStatus && Object.prototype.hasOwnProperty.call(current.statusCounts, normStatus)) {
-          current.statusCounts[normStatus] += 1;
+        if (normStatus && current.statusCounts[normStatus]) {
+          current.statusCounts[normStatus].count += 1;
+          if (t.id) current.statusCounts[normStatus].ticketIds.push(t.id);
+
+          // También en Total
+          current.statusCounts.Total.count += 1;
+          if (t.id) current.statusCounts.Total.ticketIds.push(t.id);
         }
 
         // Tiempos de resolución
@@ -196,14 +210,11 @@ app.timer('processTicketStats', {
           resolvedCount: data.resolvedCount,
         };
 
-        const totalForDay = Object.values(data.statusCounts).reduce((sum, n) => sum + (n || 0), 0);
-        const statusCountsWithTotal = { ...data.statusCounts, Total: totalForDay };
-
         locationsOutput[loc] = {
           agentStats,
           globalStats,
           hourlyBreakdown,
-          statusCounts: statusCountsWithTotal,
+          statusCounts: data.statusCounts,
           aiClassificationStats: {
             priority: data.priorityMap,
             risk: data.riskMap,
