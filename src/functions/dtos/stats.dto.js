@@ -50,27 +50,75 @@ const CommonStatsBase = {
 };
 
 // ===== Daily: hourlyBreakdown =====
+// ===== Daily: por clínicas =====
 const DailyStatsOutput = Joi.object({
   id: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
 
-  hourlyBreakdown: Joi.array().items(
+  locations: Joi.object().pattern(
+    Joi.string(), // nombre de clínica
     Joi.object({
-      hour: Joi.number().integer().min(0).max(23).required(),
-      count: Joi.number().integer().min(0).required(),
-    })
-  ).required(),
+      agentStats: Joi.array().items(
+        Joi.object({
+          agentEmail: Joi.alternatives().try(
+            Joi.string().email(),
+            Joi.string().valid('unassigned')
+          ).required(),
+          avgResolutionTimeMins: Joi.number().integer().min(0).required(),
+          resolvedCount: Joi.number().integer().min(0).required(),
+        })
+      ).required(),
 
-  ...CommonStatsBase,
+      globalStats: Joi.object({
+        avgResolutionTimeMins: Joi.number().integer().min(0).required(),
+        resolvedCount: Joi.number().integer().min(0).required(),
+      }).required(),
+
+      hourlyBreakdown: Joi.array().items(
+        Joi.object({
+          hour: Joi.number().integer().min(0).max(23).required(),
+          count: Joi.number().integer().min(0).required(),
+        })
+      ).required(),
+
+      statusCounts: Joi.object(
+        Object.fromEntries(ALLOWED_STATUSES.map(s => [s, Joi.number().integer().min(0).required()]))
+      ).pattern('Total', Joi.number().integer().min(0)),
+
+      aiClassificationStats: Joi.object({
+        priority: Joi.object().pattern(
+          Joi.string(),
+          Joi.object({
+            count: Joi.number().integer().min(0).required(),
+            ticketIds: Joi.array().items(Joi.string()).required(),
+          })
+        ).required(),
+        risk: Joi.object().pattern(
+          Joi.string(),
+          Joi.object({
+            count: Joi.number().integer().min(0).required(),
+            ticketIds: Joi.array().items(Joi.string()).required(),
+          })
+        ).required(),
+        category: Joi.object().pattern(
+          Joi.string(),
+          Joi.object({
+            count: Joi.number().integer().min(0).required(),
+            ticketIds: Joi.array().items(Joi.string()).required(),
+          })
+        ).required(),
+      }).required()
+    })
+  ).required()
 })
   .unknown(true)
   .prefs({ allowUnknown: true, stripUnknown: true });
 
+
 // ===== Monthly: dailyBreakdown =====
+// ===== Monthly: por clínicas =====
 const MonthlyStatsOutput = Joi.object({
-  // IDs típicos: "month-YYYY-MM" o "month-YYYY-MM-final"
   id: Joi.string().pattern(/^month-\d{4}-\d{2}(-final)?$/).required(),
-  // fecha de generación (YYYY-MM-DD)
   date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
 
   dailyBreakdown: Joi.array().items(
@@ -80,9 +128,57 @@ const MonthlyStatsOutput = Joi.object({
     })
   ).required(),
 
-  ...CommonStatsBase,
+  locations: Joi.object().pattern(
+    Joi.string(), // clínica
+    Joi.object({
+      agentStats: Joi.array().items(
+        Joi.object({
+          agentEmail: Joi.alternatives().try(
+            Joi.string().email(),
+            Joi.string().valid('unassigned')
+          ).required(),
+          avgResolutionTimeMins: Joi.number().integer().min(0).required(),
+          resolvedCount: Joi.number().integer().min(0).required(),
+        })
+      ).required(),
+
+      globalStats: Joi.object({
+        avgResolutionTimeMins: Joi.number().integer().min(0).required(),
+        resolvedCount: Joi.number().integer().min(0).required(),
+      }).required(),
+
+      statusCounts: Joi.object(
+        Object.fromEntries(ALLOWED_STATUSES.map(s => [s, Joi.number().integer().min(0).required()]))
+      ).pattern('Total', Joi.number().integer().min(0)),
+
+      aiClassificationStats: Joi.object({
+        priority: Joi.object().pattern(
+          Joi.string(),
+          Joi.object({
+            count: Joi.number().integer().min(0).required(),
+            ticketIds: Joi.array().items(Joi.string()).required(),
+          })
+        ).required(),
+        risk: Joi.object().pattern(
+          Joi.string(),
+          Joi.object({
+            count: Joi.number().integer().min(0).required(),
+            ticketIds: Joi.array().items(Joi.string()).required(),
+          })
+        ).required(),
+        category: Joi.object().pattern(
+          Joi.string(),
+          Joi.object({
+            count: Joi.number().integer().min(0).required(),
+            ticketIds: Joi.array().items(Joi.string()).required(),
+          })
+        ).required(),
+      }).required()
+    })
+  ).required()
 })
   .unknown(true)
   .prefs({ allowUnknown: true, stripUnknown: true });
+
 
 module.exports = { DailyStatsOutput, MonthlyStatsOutput };
