@@ -8,6 +8,7 @@ const { getEmailFromClaims } = require('./auth/auth.helper');
 const { resolveUserDepartment } = require('./helpers/resolveDepartment');
 const { GROUPS } = require('./auth/groups.config');
 const { canModifyTicket } = require('./helpers/canModifyTicketHelper');  // 👈 nuevo helper
+const { sendTeamsNotification } = require('./helpers/teamsNotificationHelper');
 
 
 const signalRUrl = process.env.SIGNALR_SEND_TO_USERS;
@@ -158,6 +159,53 @@ app.http('cosmoUpdateCollaborators', {
           }
         } catch (e) {
           context.log('⚠️ SignalR notify failed:', e.message);
+        }
+
+        // --- Notificar a colaboradores por Teams
+        try {
+          // Notificar a los colaboradores agregados
+          for (const collaboratorEmail of added) {
+            try {
+              await sendTeamsNotification({
+                user: collaboratorEmail,
+                notification: `Has sido agregado como colaborador en el ticket #${existing.id}`,
+                title: `Nuevo ticket asignado - ${existing.subject || existing.title || 'Sin título'}`,
+                ticketId: existing.id,
+                priority: existing.priority || 'normal',
+                metadata: {
+                  action: 'collaborator_added',
+                  addedBy: actor_email,
+                  ticketSubject: existing.subject || existing.title,
+                  ticketStatus: existing.status
+                }
+              }, context);
+            } catch (teamError) {
+              context.log(`⚠️ Teams notification failed for ${collaboratorEmail}:`, teamError.message);
+            }
+          }
+
+          // Notificar a los colaboradores removidos
+          for (const collaboratorEmail of removed) {
+            try {
+              await sendTeamsNotification({
+                user: collaboratorEmail,
+                notification: `Has sido removido como colaborador del ticket #${existing.id}`,
+                title: `Colaboración finalizada - ${existing.subject || existing.title || 'Sin título'}`,
+                ticketId: existing.id,
+                priority: 'low',
+                metadata: {
+                  action: 'collaborator_removed',
+                  removedBy: actor_email,
+                  ticketSubject: existing.subject || existing.title,
+                  ticketStatus: existing.status
+                }
+              }, context);
+            } catch (teamError) {
+              context.log(`⚠️ Teams notification failed for ${collaboratorEmail}:`, teamError.message);
+            }
+          }
+        } catch (e) {
+          context.log('⚠️ Teams notifications process failed:', e.message);
         }
 
         // --- DTO final
