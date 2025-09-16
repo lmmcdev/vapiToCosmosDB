@@ -174,6 +174,69 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /assignAgent:
+    patch:
+      summary: Assign agent to ticket
+      description: |
+        Assigns an agent to a specific ticket (supervisors only).
+
+        **Real-time Notifications:**
+        - Sends SignalR notifications to the assigned agent via 'ticketshubchannels' hub
+        - Sends Teams notifications to the assigned agent
+        - Enables immediate updates in connected client applications
+
+        **SignalR Integration:**
+        - Hub: 'ticketshubchannels'
+        - Target: 'agentAssignment'
+        - Payload: Complete updated ticket data
+        - Environment Variable: SIGNALR_SEND_TO_USERS
+      tags: [Tickets, Real-time Notifications]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignAgentRequest'
+      responses:
+        '200':
+          description: Agent assigned successfully with notifications sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Forbidden - Supervisors only
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Error assigning agent (may include notification failures)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      notification_status:
+                        type: object
+                        properties:
+                          signalr_sent:
+                            type: boolean
+                            description: Whether SignalR notification was sent successfully
+                          teams_sent:
+                            type: boolean
+                            description: Whether Teams notification was sent successfully
+
   # Call Analysis Endpoints
   /analyze-call:
     post:
@@ -611,6 +674,20 @@ components:
           description: System event to log
       required: [ticketId]
 
+    AssignAgentRequest:
+      type: object
+      properties:
+        tickets:
+          type: string
+          format: uuid
+          description: ID of the ticket to assign an agent to
+        target_agent_email:
+          type: string
+          format: email
+          description: Email address of the agent to assign to the ticket
+      required: [tickets, target_agent_email]
+      additionalProperties: false
+
     SearchTicketsRequest:
       type: object
       properties:
@@ -1002,6 +1079,8 @@ tags:
     description: System statistics and reporting
   - name: Teams Notifications
     description: Microsoft Teams notification management
+  - name: Real-time Notifications
+    description: SignalR and real-time notification systems
 
 # TODO Items for further development:
 # 1. Add proper server URLs for production and staging environments
@@ -1014,3 +1093,5 @@ tags:
 # 8. Define data retention and privacy policies in description
 # 9. Add request/response examples for complex operations
 # 10. Include API versioning strategy
+# 11. Add SignalR hub connection documentation and client library examples
+# 12. Document SignalR environment variables and configuration requirements
