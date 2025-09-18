@@ -237,6 +237,157 @@ paths:
                             type: boolean
                             description: Whether Teams notification was sent successfully
 
+  # OpenAI Integration Endpoints
+  /openai/query:
+    post:
+      summary: Single OpenAI query
+      description: Sends a single query to OpenAI with system prompt and user content
+      tags: [OpenAI Integration]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAIQueryRequest'
+            example:
+              systemPrompt: "You are a helpful assistant that provides clear and concise answers."
+              userContent: "What is the capital of France?"
+              options:
+                temperature: 0.7
+                maxTokens: 150
+                deploymentName: "gpt-35-turbo"
+      responses:
+        '200':
+          description: OpenAI query completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIQueryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /openai/query-bulk:
+    post:
+      summary: Bulk OpenAI queries
+      description: Sends multiple queries to OpenAI with the same system prompt but different user contents
+      tags: [OpenAI Integration]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAIBulkQueryRequest'
+            example:
+              systemPrompt: "You are a helpful assistant that provides clear and concise answers."
+              userContents:
+                - content: "What is the capital of France?"
+                  id: "question_1"
+                  metadata:
+                    category: "geography"
+                - "What is 2 + 2?"
+                - content: "Write a haiku about programming"
+                  id: "question_3"
+              options:
+                temperature: 0.7
+                maxTokens: 150
+      responses:
+        '200':
+          description: Bulk OpenAI query completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIBulkQueryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /openai/query-unified:
+    post:
+      summary: Unified OpenAI query (Public)
+      description: |
+        **Public endpoint** - Combines multiple user contents into a single OpenAI query to generate one unified evaluation or response.
+
+        **Use Case:** Perfect for HR evaluations, document analysis, or any scenario where multiple inputs
+        need to be processed together to generate a single, consolidated response.
+
+        **Key Differences from Bulk Query:**
+        - Bulk query: Processes each content separately → Multiple individual results
+        - Unified query: Combines all contents → Single consolidated result
+
+        **Authentication:** This is a public endpoint that requires no authentication.
+      tags: [OpenAI Integration, Public Endpoints]
+      security: []  # No authentication required
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAIUnifiedQueryRequest'
+            example:
+              systemPrompt: "You are an HR evaluation assistant. You will receive multiple evaluation texts written by different colleagues about the same individual. Your task is to carefully analyze all evaluations together and produce ONE FINAL structured evaluation with HR-oriented insights."
+              userContents:
+                - content: "Yo creo que la persona es muy perezosa"
+                  id: "support_001"
+                - content: "Es joven y puede crecer dentro de la empresa, pero debe esforzarse y estudiar"
+                  id: "support_002"
+                - content: "Yo creo que el premio de empleado del mes debe ser de el porque se esfuerza bastante"
+                  id: "support_004"
+                - content: "Los resultados son los que valen y aunque exista esfuerzo, esta persona no los logra"
+                  id: "support_005"
+              options:
+                temperature: 0.5
+                maxTokens: 300
+                deploymentName: "gpt-35-turbo"
+      responses:
+        '200':
+          description: Unified OpenAI query completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIUnifiedQueryResponsePublic'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /openai/classify-ticket:
+    post:
+      summary: Classify ticket using OpenAI
+      description: Uses OpenAI to classify a ticket summary into priority, risk, and category
+      tags: [OpenAI Integration, Tickets]
+      security:
+        - bearerAuth: ['access_as_user']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketClassificationRequest'
+            example:
+              summary: "Patient unable to schedule appointment through online portal, receiving error message when selecting dates"
+      responses:
+        '200':
+          description: Ticket classified successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketClassificationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   # Call Analysis Endpoints
   /analyze-call:
     post:
@@ -809,6 +960,402 @@ components:
       required: [user, notification]
       additionalProperties: false
 
+    # OpenAI Integration Schemas
+    OpenAIQueryRequest:
+      type: object
+      properties:
+        systemPrompt:
+          type: string
+          minLength: 10
+          maxLength: 2000
+          description: System prompt that defines AI behavior
+        userContent:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: User content to process
+        options:
+          type: object
+          properties:
+            temperature:
+              type: number
+              minimum: 0
+              maximum: 2
+              default: 0
+              description: Controls randomness in AI responses
+            maxTokens:
+              type: integer
+              minimum: 1
+              maximum: 4000
+              description: Maximum tokens in AI response
+            deploymentName:
+              type: string
+              enum: [gpt-35-turbo, gpt-4, gpt-4-32k]
+              default: gpt-35-turbo
+              description: OpenAI deployment model to use
+          description: Optional configuration for OpenAI query
+      required: [systemPrompt, userContent]
+      additionalProperties: false
+
+    OpenAIBulkQueryRequest:
+      type: object
+      properties:
+        systemPrompt:
+          type: string
+          minLength: 10
+          maxLength: 2000
+          description: System prompt that defines AI behavior
+        userContents:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            oneOf:
+              - type: string
+                minLength: 1
+                maxLength: 5000
+                description: Simple user content string
+              - type: object
+                properties:
+                  content:
+                    type: string
+                    minLength: 1
+                    maxLength: 5000
+                    description: User content to process
+                  id:
+                    type: string
+                    description: Optional identifier for this content
+                  metadata:
+                    type: object
+                    description: Optional metadata for this content
+                required: [content]
+                additionalProperties: false
+          description: Array of user contents to process
+        options:
+          type: object
+          properties:
+            temperature:
+              type: number
+              minimum: 0
+              maximum: 2
+              default: 0
+              description: Controls randomness in AI responses
+            maxTokens:
+              type: integer
+              minimum: 1
+              maximum: 4000
+              description: Maximum tokens in AI response
+            deploymentName:
+              type: string
+              enum: [gpt-35-turbo, gpt-4, gpt-4-32k]
+              default: gpt-35-turbo
+              description: OpenAI deployment model to use
+          description: Optional configuration for OpenAI queries
+      required: [systemPrompt, userContents]
+      additionalProperties: false
+
+    OpenAIUnifiedQueryRequest:
+      type: object
+      properties:
+        systemPrompt:
+          type: string
+          minLength: 10
+          maxLength: 4000
+          description: System prompt that defines AI behavior (extended length for complex prompts)
+        userContents:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            properties:
+              content:
+                type: string
+                minLength: 1
+                maxLength: 5000
+                description: User content to process
+              id:
+                type: string
+                description: Optional identifier for this content
+            required: [content]
+            additionalProperties: false
+          description: Array of user contents to combine into a single query
+        options:
+          type: object
+          properties:
+            temperature:
+              type: number
+              minimum: 0
+              maximum: 2
+              default: 0.5
+              description: Controls randomness in AI responses (default higher for evaluations)
+            maxTokens:
+              type: integer
+              minimum: 1
+              maximum: 4000
+              description: Maximum tokens in AI response
+            deploymentName:
+              type: string
+              enum: [gpt-35-turbo, gpt-4, gpt-4-32k]
+              default: gpt-35-turbo
+              description: OpenAI deployment model to use
+          description: Optional configuration for OpenAI query
+      required: [systemPrompt, userContents]
+      additionalProperties: false
+
+    TicketClassificationRequest:
+      type: object
+      properties:
+        summary:
+          type: string
+          minLength: 5
+          maxLength: 2000
+          description: Ticket summary to classify
+      required: [summary]
+      additionalProperties: false
+
+    # OpenAI Response Schemas
+    OpenAIQueryResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                result:
+                  description: OpenAI response content (string or parsed JSON)
+                metadata:
+                  type: object
+                  properties:
+                    userEmail:
+                      type: string
+                      format: email
+                    userLocation:
+                      type: string
+                    userRole:
+                      type: string
+                    responseType:
+                      type: string
+                      description: Type of the response data
+                    usage:
+                      type: object
+                      properties:
+                        prompt_tokens:
+                          type: integer
+                        completion_tokens:
+                          type: integer
+                        total_tokens:
+                          type: integer
+              required: [result, metadata]
+
+    OpenAIBulkQueryResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        description: Identifier for this result
+                      result:
+                        description: OpenAI response content
+                      metadata:
+                        type: object
+                        properties:
+                          responseType:
+                            type: string
+                          usage:
+                            type: object
+                            properties:
+                              prompt_tokens:
+                                type: integer
+                              completion_tokens:
+                                type: integer
+                              total_tokens:
+                                type: integer
+                    required: [id, result]
+                errors:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        description: Identifier for failed item
+                      error:
+                        type: string
+                        description: Error message
+                      metadata:
+                        type: object
+                    required: [id, error]
+                summary:
+                  type: object
+                  properties:
+                    total:
+                      type: integer
+                      description: Total number of items processed
+                    successful:
+                      type: integer
+                      description: Number of successful items
+                    failed:
+                      type: integer
+                      description: Number of failed items
+                  required: [total, successful, failed]
+                metadata:
+                  type: object
+                  properties:
+                    userEmail:
+                      type: string
+                      format: email
+                    userLocation:
+                      type: string
+                    userRole:
+                      type: string
+                    systemPromptLength:
+                      type: integer
+              required: [results, errors, summary, metadata]
+
+    OpenAIUnifiedQueryResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                result:
+                  description: Single unified OpenAI response content (string or parsed JSON)
+                metadata:
+                  type: object
+                  properties:
+                    userEmail:
+                      type: string
+                      format: email
+                    userLocation:
+                      type: string
+                    userRole:
+                      type: string
+                    responseType:
+                      type: string
+                      description: Type of the response data
+                    usage:
+                      type: object
+                      properties:
+                        prompt_tokens:
+                          type: integer
+                        completion_tokens:
+                          type: integer
+                        total_tokens:
+                          type: integer
+                    inputSummary:
+                      type: object
+                      properties:
+                        contentsCount:
+                          type: integer
+                          description: Number of user contents combined
+                        averageContentLength:
+                          type: number
+                          description: Average length of individual contents
+                        totalCombinedLength:
+                          type: integer
+                          description: Total length of combined content sent to AI
+                      required: [contentsCount, averageContentLength, totalCombinedLength]
+                    processedAt:
+                      type: string
+                      format: date-time
+                      description: When the unified query was processed
+                  required: [userEmail, userLocation, userRole, responseType, inputSummary, processedAt]
+              required: [result, metadata]
+
+    OpenAIUnifiedQueryResponsePublic:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                result:
+                  description: Single unified OpenAI response content (string or parsed JSON)
+                metadata:
+                  type: object
+                  properties:
+                    responseType:
+                      type: string
+                      description: Type of the response data
+                    usage:
+                      type: object
+                      properties:
+                        prompt_tokens:
+                          type: integer
+                        completion_tokens:
+                          type: integer
+                        total_tokens:
+                          type: integer
+                    inputSummary:
+                      type: object
+                      properties:
+                        contentsCount:
+                          type: integer
+                          description: Number of user contents combined
+                        averageContentLength:
+                          type: number
+                          description: Average length of individual contents
+                        totalCombinedLength:
+                          type: integer
+                          description: Total length of combined content sent to AI
+                      required: [contentsCount, averageContentLength, totalCombinedLength]
+                    processedAt:
+                      type: string
+                      format: date-time
+                      description: When the unified query was processed
+                  required: [responseType, inputSummary, processedAt]
+              required: [result, metadata]
+
+    TicketClassificationResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                classification:
+                  type: object
+                  properties:
+                    priority:
+                      type: string
+                      enum: [low, medium, high, normal]
+                      description: Classified priority level
+                    risk:
+                      type: string
+                      enum: [none, legal, disenrollment]
+                      description: Classified risk level
+                    category:
+                      type: string
+                      enum: [transport, appointment, new patient, disenrollment, customer service, new address, hospitalization, others, General]
+                      description: Classified category
+                  required: [priority, risk, category]
+                metadata:
+                  type: object
+                  properties:
+                    userEmail:
+                      type: string
+                      format: email
+                    userLocation:
+                      type: string
+                    userRole:
+                      type: string
+              required: [classification, metadata]
+
     # Response Schemas
     TicketResponse:
       allOf:
@@ -1081,6 +1628,10 @@ tags:
     description: Microsoft Teams notification management
   - name: Real-time Notifications
     description: SignalR and real-time notification systems
+  - name: OpenAI Integration
+    description: OpenAI and AI-powered features
+  - name: Public Endpoints
+    description: Public API endpoints that require no authentication
 
 # TODO Items for further development:
 # 1. Add proper server URLs for production and staging environments

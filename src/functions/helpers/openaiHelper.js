@@ -132,15 +132,53 @@ async function queryOpenAI(systemPrompt, userContent, options = {}) {
 }
 
 /**
+ * Realiza una consulta unificada combinando múltiples contenidos de usuario en una sola evaluación
+ * @param {string} systemPrompt - El prompt del sistema que define el comportamiento
+ * @param {Array<{content: string, id?: string}>} userContents - Array de contenidos a combinar
+ * @param {object} options - Opciones adicionales para la consulta
+ * @returns {Promise<{success: boolean, data?: any, error?: string, combinedContent?: string}>}
+ */
+async function queryOpenAIUnified(systemPrompt, userContents, options = {}) {
+  // Validación de parámetros
+  if (!Array.isArray(userContents) || userContents.length === 0) {
+    return {
+      success: false,
+      error: 'userContents must be a non-empty array'
+    };
+  }
+
+  // Combinar todos los contenidos en un solo texto
+  const combinedContent = userContents
+    .map((item, index) => {
+      const id = item.id || `evaluation_${index + 1}`;
+      return `**Evaluación ${id}:**\n${item.content}`;
+    })
+    .join('\n\n');
+
+  // Usar la función queryOpenAI existente con el contenido combinado
+  const result = await queryOpenAI(systemPrompt, combinedContent, options);
+
+  // Agregar el contenido combinado al resultado para referencia
+  if (result.success) {
+    return {
+      ...result,
+      combinedContent
+    };
+  }
+
+  return result;
+}
+
+/**
  * Función específica para clasificación de tickets (mantiene compatibilidad con código existente)
  * @param {string} summary - Resumen del ticket a clasificar
  * @returns {Promise<{priority: string, risk: string, category: string}>}
  */
 async function classifyTicket(summary) {
   const systemPrompt = 'Responde SOLO en JSON con priority (low, medium, high), risk (none, legal, disenrollment), y category (transport, appointment, new patient, disenrollment, customer service, new address, hospitalization, others).';
-  
+
   const result = await queryOpenAI(systemPrompt, `Resumen: "${summary}"`);
-  
+
   // Valores por defecto en caso de error
   const defaultClassification = {
     priority: 'normal',
@@ -166,5 +204,6 @@ async function classifyTicket(summary) {
 
 module.exports = {
   queryOpenAI,
+  queryOpenAIUnified,
   classifyTicket
 };

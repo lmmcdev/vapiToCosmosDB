@@ -81,6 +81,136 @@ const openaiOutput = Joi.alternatives().try(
 );
 
 /**
+ * DTO para consultas bulk de OpenAI
+ */
+const openaiQueryBulkInput = Joi.object({
+  systemPrompt: Joi.string()
+    .min(10)
+    .max(2000)
+    .required()
+    .label('systemPrompt')
+    .messages({
+      'string.min': 'System prompt debe tener al menos 10 caracteres',
+      'string.max': 'System prompt no puede exceder 2000 caracteres',
+      'any.required': 'System prompt es requerido'
+    }),
+
+  userContents: Joi.array()
+    .items(
+      Joi.alternatives().try(
+        // Si es string directo
+        Joi.string()
+          .min(1)
+          .max(5000)
+          .label('userContent'),
+
+        // Si es objeto con contenido
+        Joi.object({
+          content: Joi.string()
+            .min(1)
+            .max(5000)
+            .required()
+            .label('content'),
+          id: Joi.string()
+            .optional()
+            .label('id'),
+          metadata: Joi.object()
+            .optional()
+            .label('metadata')
+        })
+      )
+    )
+    .min(1)
+    .max(50)
+    .required()
+    .label('userContents')
+    .messages({
+      'array.min': 'Debe proporcionar al menos 1 contenido de usuario',
+      'array.max': 'No se pueden procesar más de 50 contenidos a la vez',
+      'any.required': 'userContents es requerido'
+    }),
+
+  options: Joi.object({
+    temperature: Joi.number()
+      .min(0)
+      .max(2)
+      .default(0)
+      .label('options.temperature'),
+
+    maxTokens: Joi.number()
+      .integer()
+      .min(1)
+      .max(4000)
+      .optional()
+      .label('options.maxTokens'),
+
+    deploymentName: Joi.string()
+      .valid('gpt-35-turbo', 'gpt-4', 'gpt-4-32k')
+      .default('gpt-35-turbo')
+      .label('options.deploymentName')
+  }).default({}).optional()
+});
+
+/**
+ * DTO para consultas unificadas de OpenAI (combina múltiples contenidos en una sola evaluación)
+ */
+const openaiQueryUnifiedInput = Joi.object({
+  systemPrompt: Joi.string()
+    .min(10)
+    .max(4000)
+    .required()
+    .label('systemPrompt')
+    .messages({
+      'string.min': 'System prompt debe tener al menos 10 caracteres',
+      'string.max': 'System prompt no puede exceder 4000 caracteres',
+      'any.required': 'System prompt es requerido'
+    }),
+
+  userContents: Joi.array()
+    .items(
+      Joi.object({
+        content: Joi.string()
+          .min(1)
+          .max(5000)
+          .required()
+          .label('content'),
+        id: Joi.string()
+          .optional()
+          .label('id')
+      })
+    )
+    .min(1)
+    .max(20)
+    .required()
+    .label('userContents')
+    .messages({
+      'array.min': 'Debe proporcionar al menos 1 contenido de usuario',
+      'array.max': 'No se pueden procesar más de 20 contenidos a la vez para evaluación unificada',
+      'any.required': 'userContents es requerido'
+    }),
+
+  options: Joi.object({
+    temperature: Joi.number()
+      .min(0)
+      .max(2)
+      .default(0.5)
+      .label('options.temperature'),
+
+    maxTokens: Joi.number()
+      .integer()
+      .min(1)
+      .max(4000)
+      .optional()
+      .label('options.maxTokens'),
+
+    deploymentName: Joi.string()
+      .valid('gpt-35-turbo', 'gpt-4', 'gpt-4-32k')
+      .default('gpt-35-turbo')
+      .label('options.deploymentName')
+  }).default({}).optional()
+});
+
+/**
  * DTO específico para clasificación de tickets (entrada)
  */
 const ticketClassificationInput = Joi.object({
@@ -134,6 +264,28 @@ function validateOpenAIOutput(data) {
 }
 
 /**
+ * Función para validar entrada de consultas bulk de OpenAI
+ */
+function validateOpenAIBulkInput(data) {
+  return openaiQueryBulkInput.validate(data, {
+    abortEarly: false,
+    stripUnknown: true,
+    convert: true
+  });
+}
+
+/**
+ * Función para validar entrada de consultas unificadas de OpenAI
+ */
+function validateOpenAIUnifiedInput(data) {
+  return openaiQueryUnifiedInput.validate(data, {
+    abortEarly: false,
+    stripUnknown: true,
+    convert: true
+  });
+}
+
+/**
  * Función para validar entrada de clasificación de tickets
  */
 function validateTicketClassificationInput(data) {
@@ -158,14 +310,18 @@ function validateTicketClassificationOutput(data) {
 module.exports = {
   // Schemas
   openaiQueryInput,
+  openaiQueryBulkInput,
+  openaiQueryUnifiedInput,
   openaiSuccessOutput,
   openaiErrorOutput,
   openaiOutput,
   ticketClassificationInput,
   ticketClassificationOutput,
-  
+
   // Validation functions
   validateOpenAIInput,
+  validateOpenAIBulkInput,
+  validateOpenAIUnifiedInput,
   validateOpenAIOutput,
   validateTicketClassificationInput,
   validateTicketClassificationOutput
