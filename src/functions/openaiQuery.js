@@ -4,11 +4,10 @@ const { withAuth } = require('./auth/withAuth');
 const { getEmailFromClaims } = require('./auth/auth.helper');
 const { resolveUserDepartment } = require('./helpers/resolveDepartment');
 const { GROUPS } = require('./auth/groups.config');
-const { queryOpenAI, queryOpenAIUnified, classifyTicket } = require('./helpers/openaiHelper');
+const { queryOpenAI, classifyTicket } = require('./helpers/openaiHelper');
 const {
   validateOpenAIInput,
   validateOpenAIBulkInput,
-  validateOpenAIUnifiedInput,
   validateTicketClassificationInput,
   validateTicketClassificationOutput
 } = require('./dtos/openai.dto');
